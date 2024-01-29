@@ -1,4 +1,4 @@
-fasttext
+fasttext # use fasttext-wheel for windows
 transformers
 torch
 torchvision

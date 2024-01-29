@@ -8,7 +8,8 @@ import pandas as pd
 from tqdm import tqdm
 video_labels = []
 target_folder = FOLDER_NAME +'/Dataset_Images/'
-folder1 = ["AllVideos"]
+# folder1 = ["AllVideos"]
+folder1 = ["Dataset/hate_videos/", "Dataset/non_hate_videos/"]
 
 
 for subDir in folder1:
@@ -25,7 +26,9 @@ for subDir in folder1:
         continue  
       # Extracting frames from video
       try:
-        os.mkdir(os.path.join(target_folder +  f.split('.')[0]))
+        # Create the target directory with intermediate directories if they do not exist
+        os.makedirs(os.path.join(target_folder, f.split('.')[0]), exist_ok=True)
+        # os.mkdir(os.path.join(target_folder +  f.split('.')[0]))
       except FileExistsError:
         pass
       if os.listdir(os.path.join(target_folder + '/' +  f.split('.')[0])):

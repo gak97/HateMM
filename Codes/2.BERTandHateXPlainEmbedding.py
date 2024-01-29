@@ -1,25 +1,23 @@
 
 
 import transformers
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import BertForTokenClassification, BertForSequenceClassification,BertPreTrainedModel, BertModel
 import torch.nn as nn
 import torch
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 import torch.nn.functional as F
 import numpy as np
-from transformers import BertTokenizer, BertModel, AutoModel
-import torch
+from transformers import BertTokenizer, AutoModel
 
 
-FOLDER_NAME = 'DataSetLocaltion/'
+FOLDER_NAME = './Dataset/hate_videos/'
 
 import pickle
 with open(FOLDER_NAME+'all__video_vosk_audioMap.p','rb') as fp:
     transCript = pickle.load(fp)
 
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from models import *
 
 model = Model_Rational_Label.from_pretrained("Hate-speech-CNERG/bert-base-uncased-hatexplain-rationale-two")
@@ -58,10 +56,6 @@ def tokenize(sentences, padding = True, max_len = 512):
 
 
 
-import numpy as np
-
-
-
 
 model2 = Text_Model()
 
@@ -87,15 +81,11 @@ with open(FOLDER_NAME+'all_HateXPlainembedding.p', 'wb') as fp:
 
 
 
-from transformers import BertTokenizer, BertModel
-import torch
-
 tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 model = BertModel.from_pretrained("bert-base-uncased")
 
 
 
-from tqdm import tqdm
 allEmbedding ={}
 for i in tqdm(transCript):
   try:
@@ -108,7 +98,6 @@ for i in tqdm(transCript):
   except:
     pass
 
-:
 
 
 len(allEmbedding)
