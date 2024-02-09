@@ -1,13 +1,13 @@
 import os
-from moviepy.editor import VideoFileClip
+from moviepy.editor import VideoFileClip, AudioFileClip
 from vosk import Model, KaldiRecognizer
 import json
 import sys
 from pydub import AudioSegment
 
 # Path to the Dataset folder containing video files
-video_folder = "./Dataset/hate_videos/"
-
+video_folder = "/backup/hatemm/Dataset/non_hate_videos/"
+#
 # Initialize the Vosk model with the language code
 model = Model("./vosk-model-en-us-0.22/")
 
@@ -17,10 +17,30 @@ processed_log_path = "processed_videos.txt"
 def extract_audio_from_video(video_path, audio_path):
     try:
         video = VideoFileClip(video_path)
-        video.audio.write_audiofile(audio_path, codec='pcm_s16le', ffmpeg_params=["-ar", "16000"])
+        # video.audio.write_audiofile(audio_path, codec='pcm_s16le', ffmpeg_params=["-ar", "16000"])
+        if video.audio:
+            audio = video.audio
+            audio.write_audiofile(audio_path, codec='pcm_s16le', ffmpeg_params=["-ar", "16000"])
+            return True
+        else:
+            print(f"No audio found in {video_path}")
+            return False
+    except Exception as e:
+        # print(f"Error extracting audio from {video_path}: {e}")
+        if 'video_fps' in str(e):
+            print(f"Video contains no video content. Attempting direct audio extraction.")
+            return extract_audio_directly(video_path, audio_path)
+        else:
+            print(f"Error extracting audio from {video_path}: {e}")
+            return False
+
+def extract_audio_directly(video_path, audio_path):
+    try:
+        audio = AudioFileClip(video_path)
+        audio.write_audiofile(audio_path, codec='pcm_s16le', ffmpeg_params=["-ar", "16000"])
         return True
     except Exception as e:
-        print(f"Error extracting audio from {video_path}: {e}")
+        print(f"Error extracting audio directly from {video_path}: {e}")
         return False
 
 def convert_to_mono(audio_path):
