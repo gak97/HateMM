@@ -21,37 +21,43 @@ from tqdm import tqdm
 # Helper function to generate mfccs
 def extract_mfcc(path):
     audio, sr=librosa.load(path)
-    mfccs=librosa.feature.mfcc(audio, sr, n_mfcc=40)
+    mfccs=librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
     return np.mean(mfccs.T, axis=0)
 	
-FOLDER_NAME ='./'
-audioPath = FOLDER_NAME + "/AudioFiles/"  
+FOLDER_NAME ='/backup/hatemm/Dataset/'
+# audioPath = FOLDER_NAME + "/AudioFiles/"  
+audio_plots_path = os.path.join(FOLDER_NAME, "Audio_plots") 
+
+# Ensure the Audio_plots directory exists
+os.makedirs(audio_plots_path, exist_ok=True)
 
 
 
 import pickle
 with open(FOLDER_NAME+'final_allNewData.p', 'rb') as fp:
     allDataAnnotation = pickle.load(fp)
+    # print(list(allDataAnnotation.values())[0])
+    allVidList = list(allDataAnnotation.values())
 
 # train, test split
-train_list, train_label= allDataAnnotation['train']
-val_list, val_label  =  allDataAnnotation['val']
-test_list, test_label  =  allDataAnnotation['test']
+# train_list, train_label= allDataAnnotation['train']
+# val_list, val_label  =  allDataAnnotation['val']
+# test_list, test_label  =  allDataAnnotation['test']
 
 
 # In[4]:
 
 
-allVidList = []
-allVidLab = []
+# allVidList = []
+# allVidLab = []
 
-allVidList.extend(train_list)
-allVidList.extend(val_list)
-allVidList.extend(test_list)
+# allVidList.extend(train_list)
+# allVidList.extend(val_list)
+# allVidList.extend(test_list)
 
-allVidLab.extend(train_label)
-allVidLab.extend(val_label)
-allVidLab.extend(test_label)
+# allVidLab.extend(train_label)
+# allVidLab.extend(val_label)
+# allVidLab.extend(test_label)
 
 
 
@@ -60,16 +66,17 @@ allAudioFeatures = {}
 failedList = []
 
 
-
+import traceback
 
 for i in tqdm(allVidList):
     try:
-        aud = extract_mfcc(audioPath+i+".wav")
+        aud = extract_mfcc(i)
+        # aud = extract_mfcc(audioPath+i+".wav")
         allAudioFeatures[i]=aud
-    except:
-        print("Error", i)
+    except Exception as e:
+        print(f"Error processing {i}: {e}")
+        traceback.print_exc()  # This will print the stack trace
         failedList.append(i)
-
 
 
 
@@ -102,15 +109,22 @@ import matplotlib.pyplot as plt
 
 
 from tqdm import tqdm
-for selected_folder in tqdm(allVidList):
+for selected_file in tqdm(allVidList):
     try:
-        path1 = os.path.join(path, selected_folder+'.wav')
+        base_name = os.path.basename(selected_file)
+        file_name, _ = os.path.splitext(base_name)
+        # path1 = os.path.join(audioPath, selected_file)
+
+        sample_rate, data = read(selected_file)
 
         fig = plt.figure(num=1, clear=True)
         ax = fig.add_subplot(111)
-        ax.plot(read(path1)[1])
+        # ax.plot(read(path1)[1])
+        ax.plot(data)
 
-        fig.savefig(FOLDER_NAME + "/Audio_plots/" + selected_folder + '.png')
+        save_path = os.path.join(audio_plots_path, file_name + '.png')
+        # fig.savefig(FOLDER_NAME + "Audio_plots" + selected_file + '.png')
+        fig.savefig(save_path)
         fig.clf()
         plt.close(fig)
 
