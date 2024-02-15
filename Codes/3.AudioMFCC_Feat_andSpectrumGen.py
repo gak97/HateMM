@@ -71,8 +71,12 @@ import traceback
 for i in tqdm(allVidList):
     try:
         aud = extract_mfcc(i)
+        # Extract the base name without extension as the key
+        video_name = os.path.basename(i)
+        # video_name = os.path.splitext(os.path.basename(i))[0]
+        allAudioFeatures[video_name.replace(".wav", ".mp4")] = aud
         # aud = extract_mfcc(audioPath+i+".wav")
-        allAudioFeatures[i]=aud
+        # allAudioFeatures[i]=aud
     except Exception as e:
         print(f"Error processing {i}: {e}")
         traceback.print_exc()  # This will print the stack trace
@@ -86,7 +90,7 @@ for i in failedList:
 
 
 import pickle
-with open(FOLDER_NAME+'MFCCFeatures.p', 'wb') as fp:
+with open(FOLDER_NAME+'MFCCFeaturesNew.p', 'wb') as fp:
     pickle.dump(allAudioFeatures,fp)
 
 

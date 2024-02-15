@@ -1,5 +1,5 @@
 
-FOLDER_NAME = '../../'
+FOLDER_NAME = '/backup/hatemm/Dataset/'
 
 """Video classification model part
 
@@ -110,6 +110,7 @@ class Dataset_3DCNN(data.Dataset):
     "Characterizes a dataset for PyTorch"
     def __init__(self, folders, labels):
         "Initialization"
+        # print(folders, labels)
         self.labels = labels
         self.folders = folders
 
@@ -118,22 +119,28 @@ class Dataset_3DCNN(data.Dataset):
         return len(self.folders)
 
     def read_text(self,selected_folder):
+        print("Selected Folder:", selected_folder)
+        # print("Text Data:", textData[selected_folder])
+        # print("Vid Data:", vidData[selected_folder])
+        # print("Aud Data:", audData[selected_folder])
         return torch.tensor(textData[selected_folder]), torch.tensor(vidData[selected_folder]), torch.tensor(audData[selected_folder])
     
 
     def __getitem__(self, index):
         "Generates one sample of data"
-        # Select sample
-        folder = self.folders[index]
         try:
+            # Select sample
+            folder = self.folders[index]
             # Load data
             X_text, X_vid, X_audio = self.read_text(folder)
-            y = torch.LongTensor([self.labels[index]])                             # (labels) LongTensor are for int64 instead of FloatTensor
-        except:
-            with open("Exceptions.txt","a") as f:
-                f.write("{}\n".format(folder))
+            y = torch.LongTensor([self.labels[index]]) 
+            return X_text, X_vid, X_audio, y
+        except Exception as e:
+            print(f"Error loading data for index {index}: {e}")                            # (labels) LongTensor are for int64 instead of FloatTensor
+        # except:
+        #     with open("Exceptions.txt","a") as f:
+        #         f.write("{}\n".format(folder))
             return None
-        return X_text, X_vid, X_audio, y
 
 def evalMetric(y_true, y_pred):
     try:
@@ -154,39 +161,47 @@ def evalMetric(y_true, y_pred):
 #loading Audio features
 import pickle
 
-with open(FOLDER_NAME+'all_HateXPlainembedding.p','rb') as fp:
-#with open(FOLDER_NAME+'all_rawBERTembedding.p','rb') as fp:
+# with open(FOLDER_NAME+'all_HateXPlainembedding.p','rb') as fp:
+with open(FOLDER_NAME+'all_rawBERTembedding.p','rb') as fp:
     textData = pickle.load(fp)
 
-with open(FOLDER_NAME+'vgg19_audFeatureMap.p','rb') as fp:
-#with open(FOLDER_NAME+'MFCCFeatures.p','rb') as fp:
+# with open(FOLDER_NAME+'vgg19_audFeatureMap.p','rb') as fp:
+with open(FOLDER_NAME+'MFCCFeaturesNew.p','rb') as fp:
     audData = pickle.load(fp)
 
     
-with open(FOLDER_NAME+'final_allNewData.p', 'rb') as fp:
+with open(FOLDER_NAME+'final_allVideos.p', 'rb') as fp:
     allDataAnnotation = pickle.load(fp)
+    allVidList = list(allDataAnnotation.values())
 
 # train, test split
-train_list, train_label= allDataAnnotation['train']
-val_list, val_label  =  allDataAnnotation['val']
-test_list, test_label  =  allDataAnnotation['test']
+# train_list, train_label= allDataAnnotation['train']
+# val_list, val_label  =  allDataAnnotation['val']
+# test_list, test_label  =  allDataAnnotation['test']
     
-allVidList = []
-allVidLab = []
+# allVidList = []
+# allVidLab = []
 
-allVidList.extend(train_list)
-allVidList.extend(val_list)
-allVidList.extend(test_list)
+# allVidList.extend(train_list)
+# allVidList.extend(val_list)
+# allVidList.extend(test_list)
 
-allVidLab.extend(train_label)
-allVidLab.extend(val_label)
-allVidLab.extend(test_label)
+# allVidLab.extend(train_label)
+# allVidLab.extend(val_label)
+# allVidLab.extend(test_label)
 
 
 vidData ={}
 for i in allVidList:
-    with open(FOLDER_NAME+"VITF/"+i+"_vit.p", 'rb') as fp:
-        vidData[i] = np.array(pickle.load(fp))    
+    video_file_name = os.path.basename(i)  # This extracts just the file name
+    video_file_name_without_extension, _ = os.path.splitext(video_file_name)
+    pickle_file_path = os.path.join(FOLDER_NAME, "VITF_new", video_file_name_without_extension + "_vit.p")
+    # with open(FOLDER_NAME+"VITF/"+i+"_vit.p", 'rb') as fp:
+    try:
+        with open(pickle_file_path, 'rb') as fp:
+            vidData[i] = np.array(pickle.load(fp))
+    except FileNotFoundError:
+        print(f"File not found: {pickle_file_path}")
   
 
 
@@ -201,7 +216,7 @@ fc1_hidden_audio, fc2_hidden_audio = 128, 128
 
 # training parameters
 k = 2            # number of target category
-epochs = 20
+epochs = 2
 batch_size = 10
 learning_rate = 1e-4
 log_interval = 1
@@ -215,7 +230,13 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
     scores = []
     N_count = 0   # counting total trained sample in one epoch
 
-    for batch_idx, (X_text, X_vid, X_aud, y) in enumerate(train_loader):
+    # for batch_idx, (X_text, X_vid, X_aud, y) in enumerate(train_loader):
+    for batch_idx, batch in enumerate(train_loader):
+        # print("Batch:", batch)
+        if batch is None:  # Skip the batch if collate_fn returned None
+            continue
+        X_text, X_vid, X_aud, y = batch
+
         # distribute data to device 
         X_text, X_vid, X_aud, y = (X_text.float()).to(device), (X_vid.float()).to(device), (X_aud.float()).to(device), y.to(device).view(-1, )
     
@@ -251,7 +272,12 @@ def validation(model, device, optimizer, test_loader, testingType = "Test"):
     all_y = []
     all_y_pred = []
     with torch.no_grad():
-        for X_text, X_vid, X_aud, y in test_loader:
+        # for X_text, X_vid, X_aud, y in test_loader:
+        for batch in test_loader:
+            # print("Batch:", batch)
+            if batch is None:
+                continue
+            X_text, X_vid, X_aud, y = batch
             # distribute data to device
             X_text, X_vid, X_aud, y = (X_text.float()).to(device), (X_vid.float()).to(device), (X_aud.float()).to(device), y.to(device).view(-1, )
 
@@ -304,6 +330,8 @@ with open(FOLDER_NAME+'allFoldDetails.p', 'rb') as fp:
 
 def collate_fn(batch):
     batch = list(filter(lambda x: x is not None, batch))
+    if len(batch) == 0:  # Check if the batch is empty after filtering
+        return None
     return torch.utils.data.dataloader.default_collate(batch)
 
 
@@ -315,8 +343,11 @@ finalOutputAccrossFold ={}
 for fold in allF:
     # train, test split
     train_list, train_label= allDataAnnotation[fold]['train']
+    # print(train_list[0], train_label[0])
     val_list, val_label  =  allDataAnnotation[fold]['val']
+    # print(val_list[0], val_label[0])
     test_list, test_label  =  allDataAnnotation[fold]['test']
+    # print(test_list[0], test_label[0])
 
 
     train_set, valid_set , test_set = Dataset_3DCNN(train_list, train_label), Dataset_3DCNN(val_list, val_label), Dataset_3DCNN(test_list, test_label)
@@ -353,8 +384,8 @@ for fold in allF:
     for epoch in range(epochs):
         # train, test model
         train_losses, train_scores = train(log_interval, comb, device, train_loader, optimizer, epoch)
-        test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
         test_loss1, test_scores1, veValid_pred = validation(comb, device, optimizer, valid_loader, 'Valid')
+        test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
         if (test_scores1['mF1Score']>finalScoreAcc):
             finalScoreAcc = test_scores1['mF1Score']
             validFinalValue = test_scores1
@@ -377,7 +408,8 @@ for fold in allF:
     finalOutputAccrossFold[fold] = {'validation':validFinalValue, 'test': testFinalValue, 'test_prediction': prediction}
         
 
-with open('foldWiseRes_vit_hateX_audioVGG19_lstm.p', 'wb') as fp:
+# with open('foldWiseRes_vit_hateX_audioVGG19_lstm.p', 'wb') as fp:
+with open('foldWiseRes_vit_bert_mfcc_lstm.p', 'wb') as fp:
     pickle.dump(finalOutputAccrossFold,fp)
         
 allValueDict ={}
