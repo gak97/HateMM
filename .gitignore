@@ -2,3 +2,4 @@ Dataset/
 Dataset_Images/
 __pycache__/
 vosk-model-en-us-0.22/
+wandb/

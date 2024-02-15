@@ -79,6 +79,9 @@ def add_video_frames_paths_to_pickle(directory, pickle_file):
 # annotations_path = '/backup/hatemm/Dataset/HateMM_annotation.csv'
 # df = pd.read_csv(annotations_path)
 
+# # Perform integer encoding for 'label' column
+# df['label'] = df['label'].apply(lambda x: 1 if x == 'Hate' else 0)
+
 # # Prepare folds
 # skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=2021)
 # folds_data = {}
@@ -139,10 +142,10 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 #     print(list(existing_data1.values())[0])
 #     print(len(list(existing_data1.values())[0]))
 
-# with open("/backup/hatemm/Dataset/VITF_new/hate_video_252_vit.p", 'rb') as fo:
+# with open("/backup/hatemm/Dataset/VITF_new/non_hate_video_289_vit.p", 'rb') as fo:
 #     existing_data1 = pickle.load(fo)
 #     print(len(existing_data1))
-#     print(list(existing_data1.values())[0])
+#     print(list(existing_data1.keys())[0])
 #     print(len(list(existing_data1.values())[0]))
 
 # with open("/backup/hatemm/Dataset/final_allImageFrames.p", 'rb') as fo:
@@ -160,9 +163,9 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 # with open("/backup/hatemm/Dataset/MFCCFeaturesNew.p", 'rb') as fo:
 #     existing_data2 = pickle.load(fo)
 #     print(len(existing_data2))
-#     print(list(existing_data2.keys())[0])
-#     print(list(existing_data2.values())[0])
-#     print(len(list(existing_data2.values())[0]))
+#     print(list(existing_data2.keys())[1])
+#     # print(list(existing_data2.values())[0])
+#     print(len(list(existing_data2.values())[1]))
 
 # with open("/backup/hatemm/Dataset/all__video_vosk_audioMap.p", 'rb') as fo:
 #     existing_data1 = pickle.load(fo)
@@ -181,5 +184,6 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 # with open("/backup/hatemm/Dataset/all_rawBERTembedding.p", 'rb') as fq:
 #     existing_data3 = pickle.load(fq)
 #     print(len(existing_data3))
+#     print(existing_data3['hate_video_108.mp4'])
 #     print(list(existing_data3.keys())[0])
 #     print(len(list(existing_data3.values())[0]))
