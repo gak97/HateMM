@@ -1,6 +1,6 @@
 
 
-FOLDER_NAME = '../../'
+FOLDER_NAME = '/backup/hatemm/Dataset/'
 
 
 
@@ -33,7 +33,8 @@ inception_v3 = models.inception_v3(pretrained=True)
 # Audio feature extractor
 vgg19 = models.vgg19(pretrained=True)
 
-
+num_video_features = 1024
+num_audio_features = 128
 
 k = 2
 epochs = 1
@@ -65,26 +66,26 @@ def evalMetric(y_true, y_pred):
 import pickle
 with open(FOLDER_NAME+'final_allNewData.p', 'rb') as fp:
     allDataAnnotation = pickle.load(fp)
+    allVidList = list(allDataAnnotation.values())
 
 # train, test split
-train_list, train_label= allDataAnnotation['train']
-val_list, val_label  =  allDataAnnotation['val']
-test_list, test_label  =  allDataAnnotation['test']
+# train_list, train_label= allDataAnnotation['train']
+# val_list, val_label  =  allDataAnnotation['val']
+# test_list, test_label  =  allDataAnnotation['test']
 
 
-# In[27]:
 
 
-allVidList = []
-allVidLab = []
+# allVidList = []
+# allVidLab = []
 
-allVidList.extend(train_list)
-allVidList.extend(val_list)
-allVidList.extend(test_list)
+# allVidList.extend(train_list)
+# allVidList.extend(val_list)
+# allVidList.extend(test_list)
 
-allVidLab.extend(train_label)
-allVidLab.extend(val_label)
-allVidLab.extend(test_label)
+# allVidLab.extend(train_label)
+# allVidLab.extend(val_label)
+# allVidLab.extend(test_label)
 
 
 
@@ -103,69 +104,90 @@ selected_frames = np.arange(begin_frame, end_frame).tolist()
 
 
 
-def read_images(path, selected_folder, use_transform):
+# def read_images(path, selected_folder, use_transform):
+def read_images(frame_paths, use_transform):
     X = []
     currFrameCount = 0
-    videoFrameCount = len([name for name in os.listdir(os.path.join(path, selected_folder))])
-    if videoFrameCount <= minFrames:
-        for i in range(videoFrameCount):
-            image = Image.open(os.path.join(path, selected_folder, 'frame_{}.jpg'.format(i)))
+    # videoFrameCount = len([name for name in os.listdir(os.path.join(path, selected_folder))])
+    # if videoFrameCount <= minFrames:
+    #     for i in range(videoFrameCount):
+    #         image = Image.open(os.path.join(path, selected_folder, 'frame_{}.jpg'.format(i)))
+    try:
+        for sub_folder in os.listdir(frame_paths):
+            sub_folder_path = os.path.join(frame_paths, sub_folder)
+            if os.path.isdir(sub_folder_path):
+                image_files = [os.path.join(sub_folder_path, f) for f in os.listdir(sub_folder_path) if f.endswith('.jpg') or f.endswith('.png')]
+                for frame_path in image_files:
+                    try:
+                        image = Image.open(frame_path)
+                        if use_transform is not None:
+                            image = use_transform(image)
 
-            if use_transform is not None:
-                image = use_transform(image)
+                        X.append(image.squeeze_(0))
+                        currFrameCount += 1
+                        if(currFrameCount==minFrames):
+                            break
+                    except Exception as e:
+                        print(f"Error processing image {frame_path}: {e}")
 
-            X.append(image.squeeze_(0))
-            currFrameCount += 1
             if(currFrameCount==minFrames):
                 break
-        paddingImage = Image.fromarray(np.zeros((100,100)), 'RGB')
-        if use_transform is not None:
-            paddingImage = use_transform(paddingImage)
-        while currFrameCount < minFrames:
-            X.append(paddingImage.squeeze_(0))
-            currFrameCount+=1
-        X = torch.stack(X, dim=0)
-    else:
-        step = int(videoFrameCount/minFrames)
-        for i in range(0,videoFrameCount,step):
-            image = Image.open(os.path.join(path, selected_folder, 'frame_{}.jpg'.format(i)))
+    except Exception as e:
+        print(f"Error processing folder {frame_paths}: {e}")
+  
+    paddingImage = Image.fromarray(np.zeros((100,100)), 'RGB')
+    if use_transform is not None:
+        paddingImage = use_transform(paddingImage)
 
-            if use_transform is not None:
-                image = use_transform(image)
+    while currFrameCount < minFrames:
+        X.append(paddingImage.squeeze_(0))
+        currFrameCount+=1
+    X = torch.stack(X, dim=0)
+    # else:
+    #     step = int(videoFrameCount/minFrames)
+    #     for i in range(0,videoFrameCount,step):
+    #         image = Image.open(os.path.join(path, selected_folder, 'frame_{}.jpg'.format(i)))
 
-            X.append(image.squeeze_(0))
-            currFrameCount += 1
-            if(currFrameCount==minFrames):
-                break
-        paddingImage = Image.fromarray(np.zeros((100,100)), 'RGB')
-        if use_transform is not None:
-            paddingImage = use_transform(paddingImage)
-        while currFrameCount < minFrames:
-            X.append(paddingImage.squeeze_(0))
-            currFrameCount+=1
-        X = torch.stack(X, dim=0)
+    #         if use_transform is not None:
+    #             image = use_transform(image)
+
+    #         X.append(image.squeeze_(0))
+    #         currFrameCount += 1
+    #         if(currFrameCount==minFrames):
+    #             break
+    #     paddingImage = Image.fromarray(np.zeros((100,100)), 'RGB')
+    #     if use_transform is not None:
+    #         paddingImage = use_transform(paddingImage)
+    #     while currFrameCount < minFrames:
+    #         X.append(paddingImage.squeeze_(0))
+    #         currFrameCount+=1
+    #     X = torch.stack(X, dim=0)
 
     return X
 
 
 
-def read_audio(path, selected_folder, use_transform):
+# def read_audio(path, selected_folder, use_transform):
+def read_audio(frame_paths, use_transform):
     X = []
-    path = os.path.join(path, selected_folder+'.png')
-    X_audio = use_transform(Image.open(path))
-    X.append((X_audio[:3,:,:]).squeeze_(0))
-    X = torch.stack(X, dim=0)
+    # path = os.path.join(path, selected_folder+'.png')
+    try:
+        X_audio = use_transform(Image.open(frame_paths))
+        X.append((X_audio[:3,:,:]).squeeze_(0))
+        X = torch.stack(X, dim=0)
+    except Exception as e:
+        print(f"Error processing audio file {frame_paths}: {e}")
     return X
 
 
 
 
 # set path
-data_image_path = FOLDER_NAME + "/Dataset_Images/"   
-data_audio_path = FOLDER_NAME + "/Audio/Audio_plots/"
+data_image_path = "/backup/hatemm/Dataset_Images/"   
+data_audio_path = FOLDER_NAME + "Audio_plots/"
 
 
-# In[25]:
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 from tqdm import tqdm
@@ -181,22 +203,34 @@ vgg19.eval()
 # vgg19 = vgg19.to(device)
 
 for folder in tqdm(allVidList):
-    video = read_images(data_image_path, folder, transform1)
-    audio = read_audio(data_audio_path, folder, transform2)
+    # print(folder)
+    # Extract the base filename without extension
+    video_name = os.path.splitext(os.path.basename(folder))[0]
 
-    video_features = torch.tensor(inception_v3(video.to(device)))
+    video_folder_path = os.path.join(data_image_path, video_name)
+    audio_file_path = os.path.join(data_audio_path, video_name + '.png')
+
+    video = read_images(video_folder_path, transform1).to(device)
+    audio = read_audio(audio_file_path, transform2).to(device)
+
+    inception_v3.to(device)
+    vgg19.to(device)
+
+    video_features = torch.tensor(inception_v3(video))
 
     U, S, V = torch.pca_lowrank(video_features.view(-1,1), center = True)
+    # print(video_features.shape[1])
     video_features = torch.matmul(video_features.view(-1,1), V[:, :num_video_features])
     video_features = video_features.view(-1).tolist()
 
-    audio_features = vgg19(audio.to(device))
+    audio_features = vgg19(audio)
     U, S, V = torch.pca_lowrank(audio_features.view(-1,1), center = True)
+    # print(audio_features.shape[1])
     audio_features = torch.matmul(audio_features.view(-1,1), V[:, :num_audio_features])
     audio_features = audio_features.view(-1).tolist()
     
-    del video
-    del audio
+    # del video
+    # del audio
     
 
     X_Video.append(video_features)
@@ -205,10 +239,11 @@ for folder in tqdm(allVidList):
 
 
 
-
-
+# Save video features
+vidFeatureMap = {}
 for i in zip(allVidList, X_Video):
-    vidFeatureMap[i[0]]=i[1]
+    video_name = os.path.basename(i[0])
+    vidFeatureMap[video_name.replace(".wav", ".mp4")]=i[1]
     
 with open('inception_vidFeatures.p', 'wb') as fp:
     pickle.dump(vidFeatureMap, fp)
@@ -216,11 +251,11 @@ with open('inception_vidFeatures.p', 'wb') as fp:
 
 
 
-
+# Save audio features
 audFeatureMap = {}
-
 for i in zip(allVidList, X_Audio):
-    audFeatureMap[i[0]]=i[1]
+    video_name = os.path.basename(i[0])
+    audFeatureMap[video_name.replace(".wav", ".mp4")]=i[1]
     
 with open('vgg19_audFeatureMap.p', 'wb') as fp:
     pickle.dump(audFeatureMap, fp)
