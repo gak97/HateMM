@@ -3,7 +3,11 @@ import torch.nn as nn
 import pickle
 from torch.utils import data
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.utils.multiclass import unique_labels
 import wandb
+from tqdm import tqdm
+import numpy as np
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from datasets import load_dataset
 dataset = load_dataset('limjiayi/hateful_memes_expanded')
@@ -43,78 +47,117 @@ class Combined_model(nn.Module):
         super().__init__()
         self.text_model = text_model
         self.image_model = image_model
-        self.fc_output   = nn.Linear(128, num_classes)
+        self.num_classes = num_classes
+
+        # Additional hidden layers
+        # self.fc1 = nn.Linear(128, 256)
+        # self.relu1 = nn.ReLU()
+        # self.fc2 = nn.Linear(256, 128)
+        # self.relu2 = nn.ReLU()
+        
+        # self.fc_output = nn.Linear(128, num_classes)
 
     def forward(self, x_text, x_img):
         if x_text is not None:
-            tex_out = self.text_model(x_text)
+            tex_out = self.text_model(x_text.to(x_text.device))
         else:
-            tex_out = torch.zeros(x_img.size(0), 64).to(x_img.device) if x_img is not None else torch.zeros(x_text.size(0), 64).to(x_text.device)
+            tex_out = torch.zeros(x_img.size(0), 64).to(x_img.device) if x_img is not None else torch.zeros(1, 64)
 
         if x_img is not None:
-            img_out = self.video_model(x_img)
+            img_out = self.image_model(x_img.to(x_img.device))
         else:
-            img_out = torch.zeros(x_text.size(0), 64).to(x_text.device) if x_text is not None else torch.zeros(x_img.size(0), 64).to(x_img.device)
+            img_out = torch.zeros(x_text.size(0), 64).to(x_text.device) if x_text is not None else torch.zeros(1, 64)
 
-        inp = torch.cat((tex_out, img_out), dim = 1)
+        # Check the number of dimensions for tex_out and img_out
+        if tex_out.ndim != img_out.ndim:
+            # Unsqueeze or squeeze to make them compatible
+            if tex_out.ndim < img_out.ndim:
+                tex_out = tex_out.unsqueeze(dim=1)
+            elif tex_out.ndim > img_out.ndim:
+                img_out = img_out.unsqueeze(dim=1)
+        
+        inp = torch.cat((tex_out, img_out), dim=1)
+        inp = inp.view(inp.size(0), -1)  # Flatten the second dimension
+
+        # Print the shapes for debugging
+        # print(f"tex_out shape: {tex_out.shape}")
+        # print(f"img_out shape: {img_out.shape}")
+        # print(f"inp shape: {inp.shape}")
+
+        self.fc_output = nn.Linear(inp.size(1), self.num_classes).to(inp.device)  # Create the linear layer on the same device as inp
+        # inp = inp.to(device)  # Move inp tensor to the same device as the model
+
+        # Pass through additional hidden layers
+        # inp = self.fc1(inp)
+        # inp = self.relu1(inp)
+        # inp = self.fc2(inp)
+        # inp = self.relu2(inp)
+
         out = self.fc_output(inp)
         return out
 
 class Dataset_ViT(data.Dataset):
-    def __init__(self, image, labels, split='train'):
+    def __init__(self, dataset, split='train'):
         "Initialization"
-        self.labels = labels
-        self.image_id = image
+        self.dataset = dataset
         self.split = split
     
-    def load_data_for_image(self, image_id, split):
+    def load_data_for_image(self, image_id):
         # Load text and image data
-        if split == 'train':
-            text_data = torch.tensor(TextEmbedding_train[image_id])
-            image_data = torch.tensor(ImgEmbedding_train[image_id])
-        elif split == 'val':
-            text_data = torch.tensor(TextEmbedding_val[image_id])
-            image_data = torch.tensor(ImgEmbedding_val[image_id])
-        else:
-            text_data = torch.tensor(TextEmbedding_test[image_id])
-            image_data = torch.tensor(ImgEmbedding_test[image_id])
+        try:
+            if self.split == 'train':
+                text_data = torch.tensor(np.array(TextEmbedding_train[image_id]))
+                image_data = torch.tensor(np.array(ImgEmbedding_train[self.modify_image_id(image_id)]))
+            elif self.split == 'validation':
+                text_data = torch.tensor(np.array(TextEmbedding_val[image_id]))
+                image_data = torch.tensor(np.array(ImgEmbedding_val[self.modify_image_id(image_id)]))
+            else:
+                text_data = torch.tensor(np.array(TextEmbedding_test[image_id]))
+                image_data = torch.tensor(np.array(ImgEmbedding_test[self.modify_image_id(image_id)]))
+        except KeyError:
+            print(f"KeyError: {image_id}")
+            # Assign default values for missing data
+            text_data = torch.zeros(768)
+            image_data = torch.zeros(768)
 
         return text_data, image_data
+    
+    def modify_image_id(self, image_id):
+        # Append '.png' if not already present
+        if not image_id.endswith(('.png', '.jpg')):
+            image_id += '.png'
+        return image_id
 
-    def __getitem__(self, image_id):
+    def __len__(self):
+        return len(self.dataset[self.split])
+
+    def __getitem__(self, index):
         "Generates one sample of data"
-
+        image_id = self.dataset[self.split]['id'][index]
         # Load data
         X_text, X_img = self.load_data_for_image(image_id)
-
         # Load label
-        y = self.labels[image_id]
+        y = self.dataset[self.split]['label'][index]
 
         return X_text, X_img, y
 
 
-import dill
-with open(FOLDER_NAME + 'new_hatefulmemes_train_VITembedding.pkl', 'rb') as fp:
-    ImgEmbedding_train = dill.load(fp)
-# with open(FOLDER_NAME + 'new_hatefulmemes_train_VITembedding.pkl', 'rb') as fp:
-#     ImgEmbedding_train = []
-#     while True:
-#         try:
-#             ImgEmbedding_train.append(pickle.load(fp))
-# # ImgEmbedding_train = pickle.load(fp)
-#         except EOFError:
-#             break
+with open(FOLDER_NAME + 'hatefulmemes_train_VITembedding.pkl', 'rb') as fp:
+    ImgEmbedding_train = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_train_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatefulmemes_train_rawBERTembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatefulmemes_train_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_train = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_validation_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatefulmemes_validation_rawBERTembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatefulmemes_validation_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_val = pickle.load(fp)
 
 with open(FOLDER_NAME + 'hatefulmemes_validation_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_val = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_test_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatefulmemes_test_rawBERTembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatefulmemes_test_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_test = pickle.load(fp)
 
 with open(FOLDER_NAME + 'hatefulmemes_test_VITembedding.pkl', 'rb') as fp:
@@ -122,18 +165,33 @@ with open(FOLDER_NAME + 'hatefulmemes_test_VITembedding.pkl', 'rb') as fp:
 
 
 def eval_metrics(y_true, y_pred):
-    accuracy = accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, average='weighted')
-    precision = precision_score(y_true, y_pred, average='weighted')
-    recall = recall_score(y_true, y_pred, average='weighted')
-    roc_auc = roc_auc_score(y_true, y_pred, average='weighted')
+    try:
+        accuracy = accuracy_score(y_true, y_pred)
+        f1 = f1_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+        precision = precision_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+        recall = recall_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+        
+        # Check if there is only one class present in y_true
+        num_classes = len(unique_labels(y_true))
+        if num_classes == 1:
+            roc_auc = 0.5  # Return a default value for binary classification
+            print("Warning: ROC AUC score is not defined for a single class. Returning default value of 0.5.")
+        else:
+            roc_auc = roc_auc_score(y_true, y_pred, average='weighted')
+    except Exception as e:
+        print(f"Error in eval_metrics: {e}")
+        return 0, 0, 0, 0, 0
     
     return accuracy, f1, precision, recall, roc_auc
 
 
 def collate_fn(batch):
     text, image, label = zip(*batch)
+    # Make sure all text tensors have the same shape
+    text = [t.squeeze(0) if t.ndim > 1 else t for t in text]
     text = torch.stack(text)
+    # Make sure all image tensors have the same shape
+    image = [img.unsqueeze(0) if img.ndim == 1 else img for img in image]
     image = torch.stack(image)
     label = torch.tensor(label)
     return text, image, label
@@ -145,33 +203,30 @@ fc2_hidden = 128
 
 # training parameters
 num_classes = 2
-learning_rate = 1e-4
-num_epochs = 2
+initial_lr = 1e-3
+num_epochs = 5
 batch_size = 16
 
 
-wandb.init(
-    project="hate-memes-classification",
-    config={
-        "learning_rate": learning_rate,
-        "architecture": "BERT + ViT",
-        "dataset": "Hateful Memes Extended",
-        "epochs": num_epochs,
-        "batch_size": batch_size,
-    },
-)
+# wandb.init(
+#     project="hate-memes-classification",
+#     config={
+#         "learning_rate": initial_lr,
+#         "architecture": "HXP + ViT",
+#         "dataset": "Hateful Memes Extended",
+#         "epochs": num_epochs,
+#         "batch_size": batch_size,
+#     },
+# )
 
 ext_data = {}
 
 # DataLoaders
-for split in dataset:
-    labels = dataset[split]['label']
-    image_ids = dataset[split]['id']
-    ext_data[split] = Dataset_ViT(image_ids, labels, split)
-    # ext_data[split] = Dataset_ViT(ImgEmbedding_train, TextEmbedding_train, dataset[split])
+for split in dataset.keys():
+    ext_data[split] = Dataset_ViT(dataset, split)
 
 train_loader = data.DataLoader(ext_data['train'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-val_loader = data.DataLoader(ext_data['val'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+val_loader = data.DataLoader(ext_data['validation'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 test_loader = data.DataLoader(ext_data['test'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 # Model
@@ -187,15 +242,23 @@ if torch.cuda.device_count() > 1:
 
 # Loss and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
 
 # Train the model
-def train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer):
+def train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr):
+    lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.1, verbose=True)
     best_val_loss = float('inf')
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0
-        for i, (text, image, labels) in enumerate(train_loader):
+
+        # Use tqdm for tracking progress
+        progress_bar = tqdm(train_loader, total=len(train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}")
+
+        for i, (text, image, labels) in enumerate(progress_bar):
+            if text is None or image is None:
+                # Skip samples with missing data
+                continue
             train_y_true = []
             train_y_pred = []
             text = text.to(device)
@@ -215,6 +278,9 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
             _, predicted = torch.max(outputs.data, 1)
             train_y_true.extend(labels.cpu().numpy())
             train_y_pred.extend(predicted.cpu().numpy())
+
+            # Update the progress bar description
+            progress_bar.set_postfix(loss=train_loss / (i + 1))
 
         train_loss /= len(train_loader)
 
@@ -237,6 +303,7 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
                 val_y_pred.extend(predicted.cpu().numpy())
 
         val_loss /= len(val_loader)
+        lr_scheduler.step(val_loss)  # Update learning rate based on validation loss
 
         wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss, 
                    "Epoch": epoch + 1, "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
@@ -249,12 +316,13 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
 
         print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}')
 
-train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer)
+# train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr)
 
 # Test the model
 def test_model(model, test_loader, criterion):
     model.load_state_dict(torch.load('best_model.pth'))
     model.eval()
+    test_loss = 0
     with torch.no_grad():
         y_true = []
         y_pred = []
@@ -265,7 +333,7 @@ def test_model(model, test_loader, criterion):
 
             outputs = model(text, image)
             loss = criterion(outputs, labels)
-            val_loss += loss.item()
+            test_loss += loss.item()
 
             _, predicted = torch.max(outputs.data, 1)
             y_true.extend(labels.cpu().numpy())
@@ -276,4 +344,21 @@ def test_model(model, test_loader, criterion):
 
         print(f'Test Accuracy: {accuracy:.4f}, Test F1: {f1:.4f}, Test Precision: {precision:.4f}, Test Recall: {recall:.4f}, Test ROC AUC: {roc_auc:.4f}')
 
-test_model(model, test_loader, criterion)
+# test_model(model, test_loader, criterion)
+
+
+
+
+# Randomly sample 5 test images, their predictions, and the true labels
+# model.load_state_dict(torch.load('best_model.pth'))
+# model.eval()
+# with torch.no_grad():
+#     for i in range(5):
+#         text, image, label = ext_data['test'][i]
+#         text = text.unsqueeze(0).to(device)
+#         image = image.unsqueeze(0).to(device)
+
+#         output = model(text, image)
+#         _, predicted = torch.max(output.data, 1)
+#         print(f"Predicted: {predicted.item()}, True label: {label}")
+

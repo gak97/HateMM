@@ -28,22 +28,25 @@ model.to(device)
 # Load processed IDs from a file
 processed_hxp_ids = set()
 try:
-    with open('processed_img_new_ids.txt', 'r') as file:
+    with open('processed_img_test_ids.txt', 'r') as file:
         for line in file:
             processed_hxp_ids.add(line.strip())
 except FileNotFoundError:
     pass
 
 print("Starting image processing for ViT...")
-split = 'train'
+split = 'test'
 ImgEmbedding_train = {}
 print(f"Processing split: {split}")
 
 for example in tqdm(dataset[split]):
     try:
         image_id_hatexplain = example['id']
-        # Append '.png' to the image ID
-        image_id_hatexplain = image_id_hatexplain + '.png'
+        # Check if the image ID ends with '.png' or '.jpg'
+        if image_id_hatexplain.endswith('.png') or image_id_hatexplain.endswith('.jpg'):
+            image_id_hatexplain = image_id_hatexplain
+        else:
+            image_id_hatexplain += '.png'
         if image_id_hatexplain in processed_hxp_ids:
             print(f"Skipping image with ID: {image_id_hatexplain}")
             continue
@@ -64,7 +67,9 @@ for example in tqdm(dataset[split]):
 
                 with torch.no_grad():
                     outputs = model(**inputs)
-                    ImgEmbedding_train[image_id_hatexplain] = outputs.last_hidden_state.detach().cpu().numpy()
+                    last_hidden_states = outputs.last_hidden_state
+                    ImgEmbedding_train[image_id_hatexplain] = [last_hidden_states[i][0].cpu().numpy() for i in range(last_hidden_states.shape[0])]
+
             else:
                 print(f"Error downloading image: {image_id_hatexplain}")
                 continue
@@ -74,30 +79,30 @@ for example in tqdm(dataset[split]):
             continue
             
         # Check if the pickle file already exists and has content
-        # pickle_file = FOLDER_NAME + f'hatefulmemes_{split}_VITembedding.pkl'
-        # if os.path.exists(pickle_file) and os.path.getsize(pickle_file) > 0:
-        #     with open(pickle_file, 'rb') as fp:
-        #         existing_data = pickle.load(fp)
-        #         existing_data.update(ImgEmbedding_train)
+        pickle_file = FOLDER_NAME + f'hatefulmemes_{split}_VITembedding.pkl'
+        if os.path.exists(pickle_file) and os.path.getsize(pickle_file) > 0:
+            with open(pickle_file, 'rb') as fp:
+                existing_data = pickle.load(fp)
+                existing_data.update(ImgEmbedding_train)
         # if os.path.exists(pickle_file):
-        #     with open(pickle_file, 'ab') as fp:
-        #         pickle.dump(ImgEmbedding_train, fp)
-        # else:
-        #     with open(pickle_file, 'wb') as fp:
-        #         pickle.dump(ImgEmbedding_train, fp)
+            with open(pickle_file, 'wb') as fp:
+                pickle.dump(existing_data, fp)
+        else:
+            with open(pickle_file, 'wb') as fp:
+                pickle.dump(ImgEmbedding_train, fp)
 
         # Check if the .npy file already exists and has content
-        npy_file = FOLDER_NAME + f'hatefulmemes_{split}_VITembedding.npy'
-        if os.path.exists(npy_file) and os.path.getsize(npy_file) > 0:
-            existing_data = np.load(npy_file, allow_pickle=True)
-            existing_data = existing_data.item()
-            existing_data.update(ImgEmbedding_train)
-            np.save(npy_file, existing_data)
-        else:
-            np.save(npy_file, ImgEmbedding_train)
+        # npy_file = FOLDER_NAME + f'hatefulmemes_{split}_VITembedding.npy'
+        # if os.path.exists(npy_file) and os.path.getsize(npy_file) > 0:
+        #     existing_data = np.load(npy_file, allow_pickle=True)
+        #     existing_data = existing_data.item()
+        #     existing_data.update(ImgEmbedding_train)
+        #     np.save(npy_file, existing_data)
+        # else:
+        #     np.save(npy_file, ImgEmbedding_train)
 
         # Write the processed ID to the file
-        with open('processed_img_new_ids.txt', 'a') as file:
+        with open('processed_img_test_ids.txt', 'a') as file:
             file.write(image_id_hatexplain + '\n')
 
     except Exception as e:
