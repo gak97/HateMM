@@ -1,3 +1,4 @@
+import copy
 import torch
 import torch.nn as nn
 import pickle
@@ -8,6 +9,7 @@ import wandb
 from tqdm import tqdm
 import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+import torch.nn.functional as F
 
 from datasets import load_dataset
 dataset = load_dataset('limjiayi/hateful_memes_expanded')
@@ -17,45 +19,58 @@ FOLDER_NAME = '/backup/hatemm/Dataset/'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Text_Model(nn.Module):
-    def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size):
+    def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size, dropout_rate=0.2):
         super().__init__()
+        self.dropout = nn.Dropout(dropout_rate)
         self.network=nn.Sequential(
             nn.Linear(input_size, fc1_hidden),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(fc1_hidden, fc2_hidden),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(fc2_hidden, fc2_hidden),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(fc2_hidden, output_size),
         )
     def forward(self, xb):
-        return self.network(xb)
+        return self.dropout(self.network(xb))
 
 class Image_Model(nn.Module):
-    def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size):
+    def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size, dropout_rate=0.2):
         super().__init__()
+        self.dropout = nn.Dropout(dropout_rate)
         self.network=nn.Sequential(
             nn.Linear(input_size, fc1_hidden),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(fc1_hidden, fc2_hidden),
             nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(fc2_hidden, fc2_hidden),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
             nn.Linear(fc2_hidden, output_size),
         )
     def forward(self, xb):
-        return self.network(xb)
+        return self.dropout(self.network(xb))
 
 class Combined_model(nn.Module):
-    def __init__(self, text_model, image_model, num_classes):
+    def __init__(self, text_model, image_model, num_classes, dropout_rate=0.2):
         super().__init__()
         self.text_model = text_model
         self.image_model = image_model
         self.num_classes = num_classes
+        self.dropout = nn.Dropout(dropout_rate)
 
         # Additional hidden layers
-        # self.fc1 = nn.Linear(128, 256)
-        # self.relu1 = nn.ReLU()
-        # self.fc2 = nn.Linear(256, 128)
-        # self.relu2 = nn.ReLU()
+        self.fc1 = nn.Linear(128, 256)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(256, 128)
+        self.relu2 = nn.ReLU()
         
-        # self.fc_output = nn.Linear(128, num_classes)
+        self.fc_output = nn.Linear(128, num_classes)
 
     def forward(self, x_text, x_img):
         if x_text is not None:
@@ -79,19 +94,27 @@ class Combined_model(nn.Module):
         inp = torch.cat((tex_out, img_out), dim=1)
         inp = inp.view(inp.size(0), -1)  # Flatten the second dimension
 
+        # Ensure that the input tensor shape matches the linear layer's weight tensor shape
+        expected_input_size = 128
+        if inp.size(1) != expected_input_size:
+            # print(f"Warning: Input tensor shape ({inp.size()}) does not match the expected shape for self.fc1. Padding the input tensor.")
+            padding_size = expected_input_size - inp.size(1)
+            inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
+
         # Print the shapes for debugging
         # print(f"tex_out shape: {tex_out.shape}")
         # print(f"img_out shape: {img_out.shape}")
         # print(f"inp shape: {inp.shape}")
 
-        self.fc_output = nn.Linear(inp.size(1), self.num_classes).to(inp.device)  # Create the linear layer on the same device as inp
+        # self.fc_output = nn.Linear(inp.size(1), self.num_classes).to(inp.device)  # Create the linear layer on the same device as inp
         # inp = inp.to(device)  # Move inp tensor to the same device as the model
 
         # Pass through additional hidden layers
-        # inp = self.fc1(inp)
-        # inp = self.relu1(inp)
-        # inp = self.fc2(inp)
-        # inp = self.relu2(inp)
+        inp = self.dropout(self.fc1(inp))
+        inp = self.relu1(inp)
+        inp = self.dropout(self.fc2(inp))
+        inp = self.relu2(inp)
+        inp = self.dropout(inp)
 
         out = self.fc_output(inp)
         return out
@@ -145,19 +168,19 @@ class Dataset_ViT(data.Dataset):
 with open(FOLDER_NAME + 'hatefulmemes_train_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_train = pickle.load(fp)
 
-# with open(FOLDER_NAME + 'all_hatefulmemes_train_rawBERTembedding.pkl', 'rb') as fp:
-with open(FOLDER_NAME + 'all_hatefulmemes_train_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatefulmemes_train_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatefulmemes_train_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_train = pickle.load(fp)
 
-# with open(FOLDER_NAME + 'all_hatefulmemes_validation_rawBERTembedding.pkl', 'rb') as fp:
-with open(FOLDER_NAME + 'all_hatefulmemes_validation_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatefulmemes_validation_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatefulmemes_validation_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_val = pickle.load(fp)
 
 with open(FOLDER_NAME + 'hatefulmemes_validation_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_val = pickle.load(fp)
 
-# with open(FOLDER_NAME + 'all_hatefulmemes_test_rawBERTembedding.pkl', 'rb') as fp:
-with open(FOLDER_NAME + 'all_hatefulmemes_test_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatefulmemes_test_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatefulmemes_test_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_test = pickle.load(fp)
 
 with open(FOLDER_NAME + 'hatefulmemes_test_VITembedding.pkl', 'rb') as fp:
@@ -186,7 +209,8 @@ def eval_metrics(y_true, y_pred):
 
 
 def collate_fn(batch):
-    text, image, label = zip(*batch)
+    text, image, label = zip(*[(t, i, l) for t, i, l in batch if torch.any(t != 0) and torch.any(i != 0)])
+    # text, image, label = zip(*batch)
     # Make sure all text tensors have the same shape
     text = [t.squeeze(0) if t.ndim > 1 else t for t in text]
     text = torch.stack(text)
@@ -196,6 +220,31 @@ def collate_fn(batch):
     label = torch.tensor(label)
     return text, image, label
 
+def label_smoothing_loss(inputs, targets, epsilon=0.1):
+    """Applies label smoothing to the cross-entropy loss"""
+    num_classes = inputs.size(-1)
+    log_probs = F.log_softmax(inputs, dim=-1)
+    # targets = targets.to(dtype=torch.float32)
+    # targets = (1.0 - epsilon) * targets + epsilon / inputs.size(-1)
+    targets = torch.zeros_like(inputs).scatter_(1, targets.unsqueeze(1), 1)
+    targets = (1 - epsilon) * targets + (epsilon / num_classes)
+    loss = (-targets * log_probs).sum(-1).mean()
+    return loss
+
+def l1_regularized_loss(outputs, labels, model, l1_lambda=0.001):
+    """Compute the cross-entropy loss with L1 regularization"""
+    loss = F.cross_entropy(outputs, labels)
+
+    # Compute the L1 regularization term
+    l1_reg = 0
+    for param in model.parameters():
+        l1_reg += torch.sum(torch.abs(param))
+
+    # Add the L1 regularization term to the loss
+    loss += l1_lambda * l1_reg
+
+    return loss
+
 input_text_size = 768
 input_image_size = 768
 fc1_hidden = 128
@@ -203,21 +252,21 @@ fc2_hidden = 128
 
 # training parameters
 num_classes = 2
-initial_lr = 1e-3
-num_epochs = 5
-batch_size = 16
+initial_lr = 1e-4
+num_epochs = 30
+batch_size = 32
 
 
-# wandb.init(
-#     project="hate-memes-classification",
-#     config={
-#         "learning_rate": initial_lr,
-#         "architecture": "HXP + ViT",
-#         "dataset": "Hateful Memes Extended",
-#         "epochs": num_epochs,
-#         "batch_size": batch_size,
-#     },
-# )
+wandb.init(
+    project="hate-memes-classification",
+    config={
+        "learning_rate": initial_lr,
+        "architecture": "BERT + ViT",
+        "dataset": "Hateful Memes Extended",
+        "epochs": num_epochs,
+        "batch_size": batch_size,
+    },
+)
 
 ext_data = {}
 
@@ -242,16 +291,20 @@ if torch.cuda.device_count() > 1:
 
 # Loss and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
+weight_decay = 1e-4
+l1_lambda = 0.001  # L1 regularization strength
+optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr, weight_decay=0)
 
 # Train the model
-def train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr):
-    lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.1, verbose=True)
+def train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr, l1_lambda, patience=5):
+    lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=patience, factor=0.1, verbose=True)
     best_val_loss = float('inf')
+    best_model_state = None
+    epochs_without_improvement = 0
+
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0
-
         # Use tqdm for tracking progress
         progress_bar = tqdm(train_loader, total=len(train_loader), desc=f"Epoch {epoch + 1}/{num_epochs}")
 
@@ -267,7 +320,9 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
 
             # Forward pass
             outputs = model(text, image)
-            loss = criterion(outputs, labels)
+            loss = l1_regularized_loss(outputs, labels, model, l1_lambda)
+            # loss = label_smoothing_loss(outputs, labels)
+            # loss = criterion(outputs, labels)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -306,17 +361,27 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
         lr_scheduler.step(val_loss)  # Update learning rate based on validation loss
 
         wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss, 
-                   "Epoch": epoch + 1, "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
+                   "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
                    "Validation Accuracy": eval_metrics(val_y_true, val_y_pred)[0],
                    "Train ROC AUC": eval_metrics(train_y_true, train_y_pred)[4], "Validation ROC AUC": eval_metrics(val_y_true, val_y_pred)[4]})
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), 'best_model.pth')
+            # torch.save(model.state_dict(), 'best_model.pth')
+            best_model_state = copy.deepcopy(model.state_dict())
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= patience:
+                print(f"Early stopping after {epoch + 1} epochs.")
+                break
 
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}')
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Train Accuracy: {eval_metrics(train_y_true, train_y_pred)[0]:.4f}, Validation Accuracy: {eval_metrics(val_y_true, val_y_pred)[0]:.4f}')
 
-# train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr)
+    if best_model_state is not None:
+        torch.save(best_model_state, 'best_model.pth')
+
+train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, l1_lambda, initial_lr)
 
 # Test the model
 def test_model(model, test_loader, criterion):
@@ -344,7 +409,7 @@ def test_model(model, test_loader, criterion):
 
         print(f'Test Accuracy: {accuracy:.4f}, Test F1: {f1:.4f}, Test Precision: {precision:.4f}, Test Recall: {recall:.4f}, Test ROC AUC: {roc_auc:.4f}')
 
-# test_model(model, test_loader, criterion)
+test_model(model, test_loader, criterion)
 
 
 
