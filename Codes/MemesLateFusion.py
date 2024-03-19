@@ -11,6 +11,9 @@ import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import torch.nn.functional as F
 
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+
 from datasets import load_dataset
 dataset = load_dataset('limjiayi/hateful_memes_expanded')
 
@@ -34,6 +37,8 @@ class Text_Model(nn.Module):
             nn.Dropout(dropout_rate),
             nn.Linear(fc2_hidden, output_size),
         )
+        self.output_size = output_size
+
     def forward(self, xb):
         return self.dropout(self.network(xb))
 
@@ -53,8 +58,72 @@ class Image_Model(nn.Module):
             nn.Dropout(dropout_rate),
             nn.Linear(fc2_hidden, output_size),
         )
+        self.output_size = output_size
+
     def forward(self, xb):
         return self.dropout(self.network(xb))
+
+class RulesFromProbabilities(nn.Module):
+    def __init__(self, visual_model, textual_model, num_classes, dropout_rate=0.2):
+        super(RulesFromProbabilities, self).__init__()
+        self.visual_model = visual_model
+        self.textual_model = textual_model
+        self.num_classes = num_classes
+        self.dropout = nn.Dropout(dropout_rate)
+        self.visual_classifier = nn.Linear(visual_model.output_size, num_classes)
+        self.textual_classifier = nn.Linear(textual_model.output_size, num_classes)
+        self.final_classifier = nn.Linear(num_classes * 2, num_classes)
+
+    def forward(self, x_text, x_img):
+        visual_output = self.visual_model(x_img)
+        textual_output = self.textual_model(x_text)
+
+        visual_probabilities = self.visual_classifier(visual_output)
+        textual_probabilities = self.textual_classifier(textual_output)
+
+        visual_probabilities = visual_probabilities.squeeze(1)
+
+        combined_probabilities = torch.cat((visual_probabilities, textual_probabilities), dim=1)
+        combined_probabilities = self.dropout(combined_probabilities)
+
+        output = self.final_classifier(combined_probabilities)
+
+        return output
+
+class WeightingTechnique(nn.Module):
+    def __init__(self, visual_model, textual_model, num_classes):
+        super(WeightingTechnique, self).__init__()
+        self.visual_model = visual_model
+        self.textual_model = textual_model
+        self.num_classes = num_classes
+        self.weight_visual = nn.Parameter(torch.randn(1, requires_grad=True))
+        self.weight_textual = nn.Parameter(torch.randn(1, requires_grad=True))
+
+        # print(f"visual_model output_size: {visual_model.output_size}, textual_model output_size: {textual_model.output_size}")
+        self.classifier = nn.Linear(visual_model.output_size + textual_model.output_size, num_classes)
+
+    def forward(self, x_text, x_img):
+        visual_output = self.visual_model(x_img)
+        textual_output = self.textual_model(x_text)
+
+        weighted_visual = self.weight_visual * visual_output
+        weighted_textual = self.weight_textual * textual_output
+
+        weighted_visual = weighted_visual.squeeze(1)
+
+        # Ensure that the same dimensions are being concatenated
+        # if weighted_textual.ndim != weighted_visual.ndim:
+        #     # Unsqueeze or squeeze to make them compatible
+        #     if weighted_textual.ndim < weighted_visual.ndim:
+        #         weighted_textual = weighted_textual.unsqueeze(dim=1)
+        #     elif weighted_textual.ndim > weighted_visual.ndim:
+        #         weighted_visual = weighted_visual.unsqueeze(dim=1)
+
+        # combined_output = weighted_visual + weighted_textual
+        combined_output = torch.cat((weighted_visual, weighted_textual), dim=1)
+        output = self.classifier(combined_output)
+
+        return output
 
 class Combined_model(nn.Module):
     def __init__(self, text_model, image_model, num_classes, dropout_rate=0.2):
@@ -64,63 +133,13 @@ class Combined_model(nn.Module):
         self.num_classes = num_classes
         self.dropout = nn.Dropout(dropout_rate)
 
-        # Additional hidden layers
-        self.fc1 = nn.Linear(128, 256)  # Adjust the input size of fc1 to match the output size of the element-wise product
-        self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(256, 128)
-        self.relu2 = nn.ReLU()
-        self.fc_output = nn.Linear(128, num_classes)
+        # self.weighting_technique = WeightingTechnique(self.image_model, self.text_model, num_classes)
+        self.rules_from_probabilities = RulesFromProbabilities(self.image_model, self.text_model, num_classes, dropout_rate)
 
     def forward(self, x_text, x_img):
-        if x_text is not None:
-            tex_out = self.text_model(x_text.to(x_text.device))
-        else:
-            tex_out = torch.zeros(x_img.size(0), 64).to(x_img.device) if x_img is not None else torch.zeros(1, 64)
-
-        if x_img is not None:
-            img_out = self.image_model(x_img.to(x_img.device))
-        else:
-            img_out = torch.zeros(x_text.size(0), 64).to(x_text.device) if x_text is not None else torch.zeros(1, 64)
-
-        # Check the number of dimensions for tex_out and img_out
-        if tex_out.ndim != img_out.ndim:
-            # Unsqueeze or squeeze to make them compatible
-            if tex_out.ndim < img_out.ndim:
-                tex_out = tex_out.unsqueeze(dim=1)
-            elif tex_out.ndim > img_out.ndim:
-                img_out = img_out.unsqueeze(dim=1)
-        
-        # inp = torch.cat((tex_out, img_out), dim=1)
-        inp = tex_out * img_out # Element-wise multiplication
-        inp = inp.view(inp.size(0), -1)  # Flatten the second dimension
-
-        # Ensure that the input tensor shape matches the linear layer's weight tensor shape
-        expected_input_size = 128
-        if inp.size(1) != expected_input_size:
-            # print(f"Warning: Input tensor shape ({inp.size()}) does not match the expected shape for self.fc1. Padding the input tensor.")
-            padding_size = expected_input_size - inp.size(1)
-            inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
-            # inp = F.pad(inp, (0, padding_size), "constant", 0)
-            # inp = inp.view(inp.size(0), 128)
-
-        # Print the shapes for debugging
-        # print(f"tex_out shape: {tex_out.shape}")
-        # print(f"img_out shape: {img_out.shape}")
-        # print(f"inp shape: {inp.shape}")
-
-        # self.fc_output = nn.Linear(inp.size(1), self.num_classes).to(inp.device)  # Create the linear layer on the same device as inp
-        # inp = inp.to(device)  # Move inp tensor to the same device as the model
-
-        # Pass through additional hidden layers
-        inp = self.fc1(inp)
-        inp = self.relu1(inp)
-        inp = self.dropout(inp)
-        inp = self.fc2(inp)
-        inp = self.relu2(inp)
-        inp = self.dropout(inp)
-
-        out = self.fc_output(inp)
-        return out
+        # outputs = self.weighting_technique(x_text, x_img)
+        outputs = self.rules_from_probabilities(x_text, x_img)
+        return outputs
 
 class Dataset_ViT(data.Dataset):
     def __init__(self, dataset, split='train'):
@@ -211,6 +230,41 @@ def eval_metrics(y_true, y_pred):
     return accuracy, f1, precision, recall, roc_auc
 
 
+def handle_imbalance(dataset, oversampling=True, undersampling=True):
+    smote = SMOTE()
+    undersampler = RandomUnderSampler()
+
+    X_text = []
+    X_img = []
+    y = []
+
+    for i in range(len(dataset)):
+        # print(dataset[i])
+        # image_id = dataset[split]['id'][i]
+        X_text_sample, X_img_sample = dataset[i][0], dataset[i][1]
+        y_sample = dataset[i][2]
+
+        X_text.append(X_text_sample)
+        X_img.append(X_img_sample)
+        y.append(y_sample)
+
+    if oversampling:
+        X_text_res, y_res = smote.fit_resample(X_text, y)
+        X_img_flattened = X_img.reshape(X_img.shape[0], -1)
+        X_img_res, _ = smote.fit_resample(X_img_flattened, y_res)
+        # X_text_res = [torch.from_numpy(x) for x in X_text_res]
+        # X_img_res = [torch.from_numpy(x) for x in X_img_res]
+    else:
+        X_text_res, X_img_res, y_res = X_text, X_img, y
+
+    if undersampling:
+        X_text_res, X_img_res, y_res = undersampler.fit_resample(X_text_res, X_img_res, y_res)
+        # X_text_res = [torch.from_numpy(x) for x in X_text_res]
+        # X_img_res = [torch.from_numpy(x) for x in X_img_res]
+
+    return X_text_res, X_img_res, y_res
+
+
 def collate_fn(batch):
     text, image, label = zip(*[(t, i, l) for t, i, l in batch if torch.any(t != 0) and torch.any(i != 0)])
     # text, image, label = zip(*batch)
@@ -223,6 +277,7 @@ def collate_fn(batch):
     label = torch.tensor(label)
     return text, image, label
 
+
 def label_smoothing_loss(inputs, targets, epsilon=0.1):
     """Applies label smoothing to the cross-entropy loss"""
     num_classes = inputs.size(-1)
@@ -233,6 +288,7 @@ def label_smoothing_loss(inputs, targets, epsilon=0.1):
     targets = (1 - epsilon) * targets + (epsilon / num_classes)
     loss = (-targets * log_probs).sum(-1).mean()
     return loss
+
 
 def l1_regularized_loss(outputs, labels, model, l1_lambda=0.001):
     """Compute the cross-entropy loss with L1 regularization"""
@@ -248,6 +304,7 @@ def l1_regularized_loss(outputs, labels, model, l1_lambda=0.001):
 
     return loss
 
+
 input_text_size = 768
 input_image_size = 768
 fc1_hidden = 128
@@ -256,20 +313,20 @@ fc2_hidden = 128
 # training parameters
 num_classes = 2
 initial_lr = 1e-4
-num_epochs = 30
+num_epochs = 5
 batch_size = 32
 
 
-wandb.init(
-    project="hate-memes-classification",
-    config={
-        "learning_rate": initial_lr,
-        "architecture": "BERT + ViT (EW Product)",
-        "dataset": "Hateful Memes Extended",
-        "epochs": num_epochs,
-        "batch_size": batch_size,
-    },
-)
+# wandb.init(
+#     project="hate-memes-classification",
+#     config={
+#         "learning_rate": initial_lr,
+#         "architecture": "BERT + ViT (Trained Probs - LF)",
+#         "dataset": "Hateful Memes Extended",
+#         "epochs": num_epochs,
+#         "batch_size": batch_size,
+#     },
+# )
 
 ext_data = {}
 
@@ -277,9 +334,19 @@ ext_data = {}
 for split in dataset.keys():
     ext_data[split] = Dataset_ViT(dataset, split)
 
-train_loader = data.DataLoader(ext_data['train'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-val_loader = data.DataLoader(ext_data['validation'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-test_loader = data.DataLoader(ext_data['test'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# Apply oversampling and undersampling
+X_text_train, X_img_train, y_train = handle_imbalance(ext_data['train'], oversampling=True, undersampling=True)
+train_loader = data.DataLoader(list(zip(X_text_train, X_img_train, y_train)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
+X_text_val, X_img_val, y_val = handle_imbalance(ext_data['validation'], oversampling=False, undersampling=False)
+val_loader = data.DataLoader(list(zip(X_text_val, X_img_val, y_val)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
+X_text_test, X_img_test, y_test = handle_imbalance(ext_data['test'], oversampling=False, undersampling=False)
+test_loader = data.DataLoader(list(zip(X_text_test, X_img_test, y_test)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
+# train_loader = data.DataLoader(ext_data['train'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# val_loader = data.DataLoader(ext_data['validation'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# test_loader = data.DataLoader(ext_data['test'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 # Model
 text_model = Text_Model(input_text_size, fc1_hidden, fc2_hidden, num_classes).to(device)
@@ -324,8 +391,8 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
             # Forward pass
             outputs = model(text, image)
             # loss = l1_regularized_loss(outputs, labels, model, l1_lambda)
-            loss = label_smoothing_loss(outputs, labels)
-            # loss = criterion(outputs, labels)
+            # loss = label_smoothing_loss(outputs, labels)
+            loss = criterion(outputs, labels)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -363,10 +430,20 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
         val_loss /= len(val_loader)
         lr_scheduler.step(val_loss)  # Update learning rate based on validation loss
 
-        wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss, 
-                   "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
-                   "Validation Accuracy": eval_metrics(val_y_true, val_y_pred)[0],
-                   "Train ROC AUC": eval_metrics(train_y_true, train_y_pred)[4], "Validation ROC AUC": eval_metrics(val_y_true, val_y_pred)[4]})
+        # Log the weights after each epoch
+        # if isinstance(model, nn.DataParallel):
+        #     # If the model is wrapped in DataParallel, the original model is accessed with .module
+        #     weight_visual = model.module.weighting_technique.weight_visual.item()
+        #     weight_textual = model.module.weighting_technique.weight_textual.item()
+        # else:
+        #     weight_visual = model.weighting_technique.weight_visual.item()
+        #     weight_textual = model.weighting_technique.weight_textual.item()
+
+        # wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss, 
+        #            "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
+        #            "Validation Accuracy": eval_metrics(val_y_true, val_y_pred)[0],
+        #         #    "Weight Visual": weight_visual, "Weight Textual": weight_textual,
+        #            "Train ROC AUC": eval_metrics(train_y_true, train_y_pred)[4], "Validation ROC AUC": eval_metrics(val_y_true, val_y_pred)[4]})
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -408,25 +485,8 @@ def test_model(model, test_loader, criterion):
             y_pred.extend(predicted.cpu().numpy())
 
         accuracy, f1, precision, recall, roc_auc = eval_metrics(y_true, y_pred)
-        wandb.log({"Test Accuracy": accuracy, "Test F1": f1, "Test Precision": precision, "Test Recall": recall, "Test ROC AUC": roc_auc})
+        # wandb.log({"Test Accuracy": accuracy, "Test F1": f1, "Test Precision": precision, "Test Recall": recall, "Test ROC AUC": roc_auc})
 
         print(f'Test Accuracy: {accuracy:.4f}, Test F1: {f1:.4f}, Test Precision: {precision:.4f}, Test Recall: {recall:.4f}, Test ROC AUC: {roc_auc:.4f}')
 
 test_model(model, test_loader, criterion)
-
-
-
-
-# Randomly sample 5 test images, their predictions, and the true labels
-# model.load_state_dict(torch.load('best_model.pth'))
-# model.eval()
-# with torch.no_grad():
-#     for i in range(5):
-#         text, image, label = ext_data['test'][i]
-#         text = text.unsqueeze(0).to(device)
-#         image = image.unsqueeze(0).to(device)
-
-#         output = model(text, image)
-#         _, predicted = torch.max(output.data, 1)
-#         print(f"Predicted: {predicted.item()}, True label: {label}")
-
