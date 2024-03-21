@@ -25,18 +25,13 @@ import pickle
 from tqdm import tqdm
 from sklearn.metrics import *
 
-
-import torch
 import pandas as pd
-#import librosa
-import numpy as np
 from torch.utils.data import TensorDataset, DataLoader, random_split
 #import librosa.display
 import matplotlib.pyplot as plt
-import tarfile
-import torch.nn as nn
 import torch.nn.functional as F
 import random
+import traceback
 
 def fix_the_random(seed_val = 2021):
     torch.backends.cudnn.deterministic = True
@@ -53,7 +48,7 @@ class Text_Model(nn.Module):
     def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size):
         super().__init__()
         self.network=nn.Sequential(
-            nn.Linear(input_size,fc1_hidden),
+            nn.Linear(input_size, fc1_hidden),
             nn.ReLU(),
             nn.Linear(fc1_hidden, fc2_hidden),
             nn.ReLU(),
@@ -70,6 +65,8 @@ class LSTM(nn.Module):
         self.fc = nn.Linear(128*no_of_frames, 64)
         
     def forward(self, x):
+        # print("X Size:", x.size())
+        x = x.squeeze(1)  # Remove the 2nd dimension
         x, _ = self.lstm(x)
         x = x.view(x.shape[0], -1)
         x = self.fc(x)
@@ -81,7 +78,7 @@ class Aud_Model(nn.Module):
     def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size):
         super().__init__()
         self.network=nn.Sequential(
-            nn.Linear(input_size,fc1_hidden),
+            nn.Linear(input_size, fc1_hidden),
             nn.ReLU(),
             nn.Linear(fc1_hidden, fc2_hidden),
             nn.ReLU(),
@@ -114,10 +111,15 @@ class Combined_model(nn.Module):
         else:
             aud_out = torch.zeros(x_text.size(0), 64).to(x_text.device) if x_text is not None else torch.zeros(x_vid.size(0), 64).to(x_vid.device)
 
-        # tex_out = self.text_model(x_text)
-        # vid_out = self.video_model(x_vid)
-        # aud_out = self.audio_model(x_audio)
-        inp = torch.cat((tex_out, vid_out, aud_out), dim = 1)
+        # Element-wise multiplication
+        # inp = tex_out * vid_out * aud_out
+        # inp = inp.view(inp.size(0), -1)
+
+        # inp = torch.cat((tex_out, vid_out, aud_out), dim = 1)
+        # inp = torch.cat((torch.zeros_like(tex_out), vid_out, aud_out), dim = 1)
+        # inp = torch.cat((tex_out, vid_out, torch.zeros_like(aud_out)), dim = 1)
+        # inp = torch.cat((tex_out, torch.empty_like(vid_out), aud_out), dim = 1)
+        inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), torch.zeros_like(aud_out)), dim = 1)
         out = self.fc_output(inp)
         return out
 
@@ -151,24 +153,30 @@ class Dataset_3DCNN(data.Dataset):
         # print("Selected Folder:", selected_folder)
         # Assuming selected_folder is the video name like 'non_hate_video_290.mp4'
         video_file_name_without_extension, _ = os.path.splitext(selected_folder)
-        pickle_file_path = os.path.join(FOLDER_NAME, "VITF", video_file_name_without_extension + "_vit.p")
+        pickle_file_path = os.path.join(FOLDER_NAME, "VITF_new", video_file_name_without_extension + "_vit.p")
+        # print("Pickle File Path:", pickle_file_path)
         
         # Load text data
         if selected_folder in textData:
-            text_features = torch.tensor(textData[selected_folder])
+            text_features = torch.tensor(np.array(textData[selected_folder]), dtype=torch.float32)
+            # print("Text Features:", text_features.size())
         else:
             raise ValueError(f"Text data not found for {selected_folder}")
         
         # Load video data
         try:
             with open(pickle_file_path, 'rb') as fp:
-                video_features = torch.tensor(np.array(pickle.load(fp)))
+                # video_features = torch.tensor(np.array(pickle.load(fp)))
+                video_data = pickle.load(fp)
+                video_features = torch.tensor(np.array(list(video_data.values())), dtype=torch.float32)
+                # print("Video Features:", video_features.size())
         except FileNotFoundError:
             raise ValueError(f"Video data file not found: {pickle_file_path}")
         
         # Load audio data
         if selected_folder in audData:
-            audio_features = torch.tensor(audData[selected_folder])
+            audio_features = torch.tensor(np.array(audData[selected_folder]), dtype=torch.float32)
+            # print("Audio Features:", audio_features.size())
         else:
             raise ValueError(f"Audio data not found for {selected_folder}")
         
@@ -184,10 +192,8 @@ class Dataset_3DCNN(data.Dataset):
             y = torch.LongTensor([self.labels[index]]) 
             return X_text, X_vid, X_audio, y
         except Exception as e:
-            print(f"Error loading data for index {index}: {e}")                            # (labels) LongTensor are for int64 instead of FloatTensor
-        # except:
-        #     with open("Exceptions.txt","a") as f:
-        #         f.write("{}\n".format(folder))
+            # traceback.print_exc()
+            print(f"Error loading data for index {index}: {e}")                        
             return None
 
 def evalMetric(y_true, y_pred):
@@ -209,18 +215,18 @@ def evalMetric(y_true, y_pred):
 #loading Audio features
 import pickle
 
-# with open(FOLDER_NAME+'all_HateXPlainembedding.p','rb') as fp:
-with open(FOLDER_NAME+'all_rawBERTembedding.p','rb') as fp:
+with open(FOLDER_NAME+'all_HateXPlainembedding.pkl','rb') as fp:
+# with open(FOLDER_NAME+'all_rawBERTembedding.pkl','rb') as fp:
     textData = pickle.load(fp)
 
-# with open(FOLDER_NAME+'vgg19_audFeatureMap.p','rb') as fp:
-with open(FOLDER_NAME+'MFCCFeaturesNew.p','rb') as fp:
+# with open(FOLDER_NAME+'vgg19_audFeatureMap.pkl','rb') as fp:
+with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
     audData = pickle.load(fp)
 
     
-with open(FOLDER_NAME+'final_allVideos.p', 'rb') as fp:
-    allDataAnnotation = pickle.load(fp)
-    allVidList = list(allDataAnnotation.values())
+# with open(FOLDER_NAME+'final_allVideos.pkl', 'rb') as fp:
+#     allDataAnnotation = pickle.load(fp)
+#     allVidList = list(allDataAnnotation.values())
 
 # train, test split
 # train_list, train_label= allDataAnnotation['train']
@@ -257,28 +263,27 @@ input_size_text = 768
 
 input_size_audio = 40 # 1000
 
-
 fc1_hidden_audio, fc2_hidden_audio = 128, 128
 
 # training parameters
 k = 2            # number of target category
-epochs = 20
-batch_size = 10
+epochs = 3
+batch_size = 16
 learning_rate = 1e-4
-log_interval = 5
+log_interval = 100
 
 
-import wandb
-wandb.init(
-    project="hate-video-classification",
-    config={
-        "learning_rate": learning_rate,
-        "architecture": "BERT + MFCC + LSTM + ViT",
-        "dataset": "HateMM",
-        "epochs": epochs,
-        "batch_size": batch_size,
-    },
-)
+# import wandb
+# wandb.init(
+#     project="hate-video-classification",
+#     config={
+#         "learning_rate": learning_rate,
+#         "architecture": "HXP + MFCC + LSTM + ViT",
+#         "dataset": "HateMM",
+#         "epochs": epochs,
+#         "batch_size": batch_size,
+#     },
+# )
 
 
 def train(log_interval, model, device, train_loader, optimizer, epoch):
@@ -317,8 +322,8 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
-        wandb.log({"loss": loss.item(), "accuracy": metrics['accuracy'], "f1": metrics['f1Score'], "mF1": metrics['mF1Score'], 
-                   "auc": metrics['auc'], "precision": metrics['precision'], "recall": metrics['recall']})
+        # wandb.log({"loss": loss.item(), "accuracy": metrics['accuracy'], "f1": metrics['f1Score'], "mF1": metrics['mF1Score'], 
+        #            "auc": metrics['auc'], "precision": metrics['precision'], "recall": metrics['recall']})
 
         # show information
         if (batch_idx + 1) % log_interval == 0:
@@ -366,8 +371,8 @@ def validation(model, device, optimizer, test_loader, testingType = "Test"):
     # except:
     #   metrics = None
 
-    wandb.log({f"{testingType}_loss": test_loss, f"{testingType}_accuracy": metrics['accuracy'], f"{testingType}_f1": metrics['f1Score'], f"{testingType}_mF1": metrics['mF1Score'],
-                f"{testingType}_auc": metrics['auc'], f"{testingType}_precision": metrics['precision'], f"{testingType}_recall": metrics['recall']})
+    # wandb.log({f"{testingType}_loss": test_loss, f"{testingType}_accuracy": metrics['accuracy'], f"{testingType}_f1": metrics['f1Score'], f"{testingType}_mF1": metrics['mF1Score'],
+    #             f"{testingType}_auc": metrics['auc'], f"{testingType}_precision": metrics['precision'], f"{testingType}_recall": metrics['recall']})
 
     # show information
     print('\n '+testingType+' set: ({:d} samples): Average loss: {:.4f}, Accuracy: {:.2f}%, MF1 Score: {:.4f}, F1 Score: {:.4f}, Area Under Curve: {:.4f}, Precision: {:.4f}, Recall Score: {:.4f}'.format(
@@ -390,16 +395,31 @@ device = torch.device("cuda" if use_cuda else "cpu")   # use CPU or GPU
 params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': 2, 'pin_memory': True} if use_cuda else {}
 valParams = {'batch_size': batch_size, 'shuffle': False, 'num_workers': 2, 'pin_memory': True} if use_cuda else {}
 
-with open(FOLDER_NAME+'allFoldDetails.p', 'rb') as fp:
+with open(FOLDER_NAME+'allFoldDetails.pkl', 'rb') as fp:
     allDataAnnotation = pickle.load(fp)
 
 
 def collate_fn(batch):
+    # print("before batch:", batch)
     batch = list(filter(lambda x: x is not None, batch))
+    # print("after batch:", batch)
     if len(batch) == 0:  # Check if the batch is empty after filtering
         return None
     return torch.utils.data.dataloader.default_collate(batch)
 
+
+tex = Text_Model(input_size_text, fc1_hidden_audio, fc2_hidden_audio, 64).to(device)
+vid = LSTM().to(device)
+aud = Aud_Model(input_size_audio, fc1_hidden_audio, fc2_hidden_audio, 64).to(device)
+comb = Combined_model(tex, vid, aud, k).to(device)
+
+
+# Parallelize model to multiple GPUs
+if torch.cuda.device_count() > 1:
+    print("Using", torch.cuda.device_count(), "GPUs!")
+    comb = nn.DataParallel(comb)
+
+optimizer = torch.optim.Adam(comb.parameters(), lr=learning_rate) 
 
 allF = ['fold1', 'fold2', 'fold3', 'fold4', 'fold5']
 
@@ -422,20 +442,6 @@ for fold in allF:
     valid_loader = data.DataLoader(valid_set, collate_fn = collate_fn, **valParams)
 
 
-    tex = Text_Model(input_size_text, fc1_hidden_audio, fc2_hidden_audio, 64).to(device)
-    vid = LSTM().to(device)
-    aud = Aud_Model(input_size_audio, fc1_hidden_audio, fc2_hidden_audio, 64).to(device)
-    comb = Combined_model(tex, vid, aud, k).to(device)
-
-
-    # Parallelize model to multiple GPUs
-    if torch.cuda.device_count() > 1:
-        print("Using", torch.cuda.device_count(), "GPUs!")
-        comb = nn.DataParallel(comb)
-
-    optimizer = torch.optim.Adam(comb.parameters(), lr=learning_rate)   # optimize all cnn parameters
-
-
     epoch_train_losses = []
     epoch_train_scores = []
     epoch_test_losses = []
@@ -443,7 +449,7 @@ for fold in allF:
 
     validFinalValue = None
     testFinalValue = None
-    finalScoreAcc =0
+    finalScoreAcc = 0
     prediction  = None
 
     # start training
@@ -475,7 +481,7 @@ for fold in allF:
         
 
 # with open('foldWiseRes_vit_hateX_audioVGG19_lstm.p', 'wb') as fp:
-with open('foldWiseRes_vit_bert_mfcc_lstm.p', 'wb') as fp:
+with open('foldWiseRes_vit_hxp_mfcc_lstm.pkl', 'wb') as fp:
     pickle.dump(finalOutputAccrossFold,fp)
         
 allValueDict ={}
@@ -487,8 +493,6 @@ for fold in allF:
             allValueDict[val]=[finalOutputAccrossFold[fold]['test'][val]]
 
 
-
-import numpy as np
 for i in allValueDict:
     print(f"{i} : Mean {np.mean(allValueDict[i])}  STD: {np.std(allValueDict[i])}")
 
