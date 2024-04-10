@@ -1,5 +1,7 @@
 import os
 import pickle
+import numpy as np
+import torch
 
 def add_transcripts_to_pickle(directory, pickle_file):
     transcripts = {}
@@ -72,6 +74,7 @@ def add_video_frames_paths_to_pickle(directory, pickle_file):
 # add_video_frames_paths_to_pickle('/backup/hatemm/Dataset_Images/', '/backup/hatemm/Dataset/final_allImageFrames.p')
 
 
+
 # import pandas as pd
 # from sklearn.model_selection import StratifiedKFold, train_test_split
 
@@ -83,26 +86,39 @@ def add_video_frames_paths_to_pickle(directory, pickle_file):
 # df['label'] = df['label'].apply(lambda x: 1 if x == 'Hate' else 0)
 
 # # Prepare folds
-# skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=2021)
-# folds_data = {}
+# # skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=2021)
+# # folds_data = {}
+
+# train_df, test_df = train_test_split(df, test_size=0.2, stratify=df['label'], random_state=2024)
+# train_df, val_df = train_test_split(train_df, test_size=0.1, stratify=train_df['label'], random_state=2024)
 
 # # Split data into folds
-# for fold, (train_val_idx, test_idx) in enumerate(skf.split(df, df['label'])):
-#     train_val_df = df.iloc[train_val_idx]
-#     test_df = df.iloc[test_idx]
+# # for fold, (train_val_idx, test_idx) in enumerate(skf.split(df, df['label'])):
+# #     train_val_df = df.iloc[train_val_idx]
+# #     test_df = df.iloc[test_idx]
     
-#     # Further split train_val into train and validation
-#     train_df, val_df = train_test_split(train_val_df, test_size=0.2, stratify=train_val_df['label'], random_state=2021)
+# #     # Further split train_val into train and validation
+# #     train_df, val_df = train_test_split(train_val_df, test_size=0.2, stratify=train_val_df['label'], random_state=2021)
     
-#     # Prepare data for this fold
-#     folds_data[f'fold{fold+1}'] = {
-#         'train': (train_df['video_file_name'].tolist(), train_df['label'].tolist()),
-#         'val': (val_df['video_file_name'].tolist(), val_df['label'].tolist()),
-#         'test': (test_df['video_file_name'].tolist(), test_df['label'].tolist())
-#     }
+# #     # Prepare data for this fold
+# #     folds_data[f'fold{fold+1}'] = {
+# #         'train': (train_df['video_file_name'].tolist(), train_df['label'].tolist()),
+# #         'val': (val_df['video_file_name'].tolist(), val_df['label'].tolist()),
+# #         'test': (test_df['video_file_name'].tolist(), test_df['label'].tolist())
+# #     }
+
+# folds_data = {
+#     'train': (train_df['video_file_name'].tolist(), train_df['label'].tolist()),
+#     'val': (val_df['video_file_name'].tolist(), val_df['label'].tolist()),
+#     'test': (test_df['video_file_name'].tolist(), test_df['label'].tolist())
+# }
+
+# print("Train size:", len(train_df))
+# print("Validation size:", len(val_df))
+# print("Test size:", len(test_df))
 
 # # Save the fold details
-# fold_details_path = os.path.join('/backup/hatemm/Dataset/', 'allFoldDetails.p')
+# fold_details_path = os.path.join('/backup/hatemm/Dataset/', 'noFoldDetails.pkl')
 # with open(fold_details_path, 'wb') as fp:
 #     pickle.dump(folds_data, fp)
 
@@ -136,17 +152,41 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 
 
 
-# with open("/backup/hatemm/Dataset/allFoldDetails.p", 'rb') as fo:
+# with open("/backup/hatemm/Dataset/inception_vidFeatures.p", 'rb') as fo:
+#     existing_data1 = pickle.load(fo)
+#     print(len(existing_data1))
+#     print(list(existing_data1.keys())[1])
+#     # print(list(existing_data1.values())[0])
+#     print(len(list(existing_data1.values())[1]))
+
+# with open("/backup/hatemm/Dataset/vgg19_audFeatureMap.p", 'rb') as fo:
+#     existing_data1 = pickle.load(fo)
+#     print(len(existing_data1))
+#     print(list(existing_data1.keys())[1])
+#     # print(list(existing_data1.values())[0])
+#     print(len(list(existing_data1.values())[1]))
+
+# with open("/backup/hatemm/Dataset/allFoldDetails.pkl", 'rb') as fo:
 #     existing_data1 = pickle.load(fo)
 #     print(len(existing_data1))
 #     print(list(existing_data1.values())[0])
 #     print(len(list(existing_data1.values())[0]))
 
+# with open("/backup/hatemm/Dataset/hatefulmemes_train_VITembedding.npy", 'rb') as fo:
+#     existing_data1 = np.load(fo, allow_pickle=True)
+#     print(len(existing_data1.item()))
+#     print(list(existing_data1.item().keys())[0])
+#     print(len(list(existing_data1.item().values())[0]))
+#     print(len(list(existing_data1.item().values())[0][0]))
+#     print(len(list(existing_data1.item().values())[0][0][0]))
+
 # with open("/backup/hatemm/Dataset/VITF_new/non_hate_video_289_vit.p", 'rb') as fo:
 #     existing_data1 = pickle.load(fo)
+#     print(torch.tensor(list(existing_data1.values()), dtype=torch.float32))
 #     print(len(existing_data1))
 #     print(list(existing_data1.keys())[0])
 #     print(len(list(existing_data1.values())[0]))
+#     print(len(list(existing_data1.values())[0][0]))
 
 # with open("/backup/hatemm/Dataset/final_allImageFrames.p", 'rb') as fo:
 #     existing_data1 = pickle.load(fo)
@@ -160,10 +200,12 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 #     print(list(existing_data1.values())[0])
 #     print(len(list(existing_data1.values())[0]))
 
-# with open("/backup/hatemm/Dataset/MFCCFeaturesNew.p", 'rb') as fo:
+# with open("/backup/hatemm/Dataset/MFCCFeaturesNew.pkl", 'rb') as fo:
 #     existing_data2 = pickle.load(fo)
 #     print(len(existing_data2))
 #     print(list(existing_data2.keys())[1])
+#     first_value = next(iter(existing_data2.values()))
+#     print(first_value.shape)
 #     # print(list(existing_data2.values())[0])
 #     print(len(list(existing_data2.values())[1]))
 
@@ -176,14 +218,41 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 #         print(existing_data1[i])
 #         break
 
-# with open("/backup/hatemm/Dataset/all_HateXPlainembedding.p", 'rb') as fp:
+# with open("/backup/hatemm/Dataset/all_hatefulmemes_train_hatexplain_embedding.pkl", 'rb') as fp:
 #     existing_data2 = pickle.load(fp)
 #     print(len(existing_data2))
+#     print(list(existing_data2.keys())[0])
+#     print(list(existing_data2.values())[0])
 #     print(len(list(existing_data2.values())[0]))
 
-# with open("/backup/hatemm/Dataset/all_rawBERTembedding.p", 'rb') as fq:
+# with open("/backup/hatemm/Dataset/all_rawBERTembedding.pkl", 'rb') as fq:
 #     existing_data3 = pickle.load(fq)
 #     print(len(existing_data3))
-#     print(existing_data3['hate_video_108.mp4'])
+#     print(existing_data3['non_hate_video_132.mp4'])
 #     print(list(existing_data3.keys())[0])
 #     print(len(list(existing_data3.values())[0]))
+
+# with open("/backup/hatemm/Dataset/all_HateXPlainembedding.pkl", 'rb') as fq:
+#     existing_data3 = pickle.load(fq)
+#     print(len(existing_data3))
+#     print(existing_data3['non_hate_video_6.mp4'])
+#     print(list(existing_data3.keys())[0])
+#     print(len(list(existing_data3.values())[0]))
+
+with open("/backup/hatemm/Dataset/Wav2Vec2_features_chunked.pkl", 'rb') as fo:
+    existing_data2 = pickle.load(fo)
+    print(len(existing_data2))
+    # print(list(existing_data2['hate_video_95.mp4']))
+    # print(list(existing_data2.values())[0])
+    first_value = next(iter(existing_data2.values()))
+    print(first_value.shape)
+    print(len(list(existing_data2.values())[1]))
+
+# with open("/backup/hatemm/Dataset/CLAP_features.pkl", 'rb') as fo:
+#     existing_data2 = pickle.load(fo)
+#     print(len(existing_data2))
+#     # print(list(existing_data2['hate_video_95.mp4']))
+#     print(list(existing_data2.values())[0])
+#     first_value = next(iter(existing_data2.values()))
+#     print(first_value.shape)
+#     print(len(list(existing_data2.values())[1]))

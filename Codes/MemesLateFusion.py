@@ -187,25 +187,25 @@ class Dataset_ViT(data.Dataset):
         return X_text, X_img, y
 
 
-with open(FOLDER_NAME + 'hatefulmemes_train_VITembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'hatememesext_train_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_train = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_train_rawBERTembedding.pkl', 'rb') as fp:
-# with open(FOLDER_NAME + 'all_hatefulmemes_train_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatememesext_train_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememesext_train_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_train = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_validation_rawBERTembedding.pkl', 'rb') as fp:
-# with open(FOLDER_NAME + 'all_hatefulmemes_validation_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatememesext_validation_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememesext_validation_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_val = pickle.load(fp)
 
-with open(FOLDER_NAME + 'hatefulmemes_validation_VITembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'hatememesext_validation_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_val = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_test_rawBERTembedding.pkl', 'rb') as fp:
-# with open(FOLDER_NAME + 'all_hatefulmemes_test_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatememesext_test_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememesext_test_hatexplain_embedding.pkl', 'rb') as fp:
     TextEmbedding_test = pickle.load(fp)
 
-with open(FOLDER_NAME + 'hatefulmemes_test_VITembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'hatememesext_test_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_test = pickle.load(fp)
 
 
@@ -233,14 +233,11 @@ def eval_metrics(y_true, y_pred):
 def handle_imbalance(dataset, oversampling=True, undersampling=True):
     smote = SMOTE()
     undersampler = RandomUnderSampler()
-
     X_text = []
     X_img = []
     y = []
 
     for i in range(len(dataset)):
-        # print(dataset[i])
-        # image_id = dataset[split]['id'][i]
         X_text_sample, X_img_sample = dataset[i][0], dataset[i][1]
         y_sample = dataset[i][2]
 
@@ -250,8 +247,10 @@ def handle_imbalance(dataset, oversampling=True, undersampling=True):
 
     if oversampling:
         X_text_res, y_res = smote.fit_resample(X_text, y)
-        X_img_flattened = X_img.reshape(X_img.shape[0], -1)
-        X_img_res, _ = smote.fit_resample(X_img_flattened, y_res)
+        # print(f"X_text_res: {len(X_text_res)}, y_res: {len(y_res)}")
+        X_img_array = np.stack(X_img)
+        X_img_flattened = X_img_array.reshape(X_img_array.shape[0], -1)
+        X_img_res, _ = smote.fit_resample(X_img_flattened, y)
         # X_text_res = [torch.from_numpy(x) for x in X_text_res]
         # X_img_res = [torch.from_numpy(x) for x in X_img_res]
     else:
@@ -268,6 +267,9 @@ def handle_imbalance(dataset, oversampling=True, undersampling=True):
 def collate_fn(batch):
     text, image, label = zip(*[(t, i, l) for t, i, l in batch if torch.any(t != 0) and torch.any(i != 0)])
     # text, image, label = zip(*batch)
+    # Convert to tensor if it's not already one
+    text = [torch.tensor(t) if not isinstance(t, torch.Tensor) else t for t in text]
+    image = [torch.tensor(img) if not isinstance(img, torch.Tensor) else img for img in image]
     # Make sure all text tensors have the same shape
     text = [t.squeeze(0) if t.ndim > 1 else t for t in text]
     text = torch.stack(text)
@@ -313,40 +315,52 @@ fc2_hidden = 128
 # training parameters
 num_classes = 2
 initial_lr = 1e-4
-num_epochs = 5
+num_epochs = 30
 batch_size = 32
 
 
-# wandb.init(
-#     project="hate-memes-classification",
-#     config={
-#         "learning_rate": initial_lr,
-#         "architecture": "BERT + ViT (Trained Probs - LF)",
-#         "dataset": "Hateful Memes Extended",
-#         "epochs": num_epochs,
-#         "batch_size": batch_size,
-#     },
-# )
+wandb.init(
+    project="hate-memes-classification",
+    config={
+        "learning_rate": initial_lr,
+        "architecture": "BERT + ViT (Trained Probs - LF)",
+        "dataset": "Hateful Memes",
+        "epochs": num_epochs,
+        "batch_size": batch_size,
+    },
+)
 
 ext_data = {}
 
 # DataLoaders
 for split in dataset.keys():
+    # consider only the first 8.5k samples for training, 500 for validation, and 1k for testing (hateful memes dataset)
+    if split == 'train':
+        dataset[split] = dataset[split].select(list(range(8500)))
+    elif split == 'validation':
+        dataset[split] = dataset[split].select(list(range(500)))
+    elif split == 'test':
+        dataset[split] = dataset[split].select(list(range(1000)))
+        
+    # get label statistics
+    label_stats = np.array(dataset[split]['label'])
+    print(f"Label statistics for {split}: {np.unique(label_stats, return_counts=True)}")
+
     ext_data[split] = Dataset_ViT(dataset, split)
 
 # Apply oversampling and undersampling
-X_text_train, X_img_train, y_train = handle_imbalance(ext_data['train'], oversampling=True, undersampling=True)
-train_loader = data.DataLoader(list(zip(X_text_train, X_img_train, y_train)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# X_text_train, X_img_train, y_train = handle_imbalance(ext_data['train'], oversampling=True, undersampling=False)
+# train_loader = data.DataLoader(list(zip(X_text_train, X_img_train, y_train)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-X_text_val, X_img_val, y_val = handle_imbalance(ext_data['validation'], oversampling=False, undersampling=False)
-val_loader = data.DataLoader(list(zip(X_text_val, X_img_val, y_val)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# X_text_val, X_img_val, y_val = handle_imbalance(ext_data['validation'], oversampling=False, undersampling=False)
+# val_loader = data.DataLoader(list(zip(X_text_val, X_img_val, y_val)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-X_text_test, X_img_test, y_test = handle_imbalance(ext_data['test'], oversampling=False, undersampling=False)
-test_loader = data.DataLoader(list(zip(X_text_test, X_img_test, y_test)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+# X_text_test, X_img_test, y_test = handle_imbalance(ext_data['test'], oversampling=False, undersampling=False)
+# test_loader = data.DataLoader(list(zip(X_text_test, X_img_test, y_test)), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-# train_loader = data.DataLoader(ext_data['train'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-# val_loader = data.DataLoader(ext_data['validation'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-# test_loader = data.DataLoader(ext_data['test'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+train_loader = data.DataLoader(ext_data['train'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+val_loader = data.DataLoader(ext_data['validation'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+test_loader = data.DataLoader(ext_data['test'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 # Model
 text_model = Text_Model(input_text_size, fc1_hidden, fc2_hidden, num_classes).to(device)
@@ -439,11 +453,11 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
         #     weight_visual = model.weighting_technique.weight_visual.item()
         #     weight_textual = model.weighting_technique.weight_textual.item()
 
-        # wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss, 
-        #            "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
-        #            "Validation Accuracy": eval_metrics(val_y_true, val_y_pred)[0],
-        #         #    "Weight Visual": weight_visual, "Weight Textual": weight_textual,
-        #            "Train ROC AUC": eval_metrics(train_y_true, train_y_pred)[4], "Validation ROC AUC": eval_metrics(val_y_true, val_y_pred)[4]})
+        wandb.log({"Train Loss": train_loss, "Validation Loss": val_loss, 
+                   "Train Accuracy": eval_metrics(train_y_true, train_y_pred)[0], 
+                   "Validation Accuracy": eval_metrics(val_y_true, val_y_pred)[0],
+                #    "Weight Visual": weight_visual, "Weight Textual": weight_textual,
+                   "Train ROC AUC": eval_metrics(train_y_true, train_y_pred)[4], "Validation ROC AUC": eval_metrics(val_y_true, val_y_pred)[4]})
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -485,8 +499,26 @@ def test_model(model, test_loader, criterion):
             y_pred.extend(predicted.cpu().numpy())
 
         accuracy, f1, precision, recall, roc_auc = eval_metrics(y_true, y_pred)
-        # wandb.log({"Test Accuracy": accuracy, "Test F1": f1, "Test Precision": precision, "Test Recall": recall, "Test ROC AUC": roc_auc})
+        wandb.log({"Test Accuracy": accuracy, "Test F1": f1, "Test Precision": precision, "Test Recall": recall, "Test ROC AUC": roc_auc})
 
         print(f'Test Accuracy: {accuracy:.4f}, Test F1: {f1:.4f}, Test Precision: {precision:.4f}, Test Recall: {recall:.4f}, Test ROC AUC: {roc_auc:.4f}')
 
 test_model(model, test_loader, criterion)
+
+
+
+
+# Randomly sample 5 test images, their predictions, and the true labels
+# model.load_state_dict(torch.load('best_model.pth'))
+# model.eval()
+# with torch.no_grad():
+#     # take 5 random samples from the test set
+#     for i in np.random.randint(0, len(ext_data['test']), 5):
+#         text, image, label = ext_data['test'][i]
+#         text = text.unsqueeze(0).to(device)
+#         image = image.unsqueeze(0).to(device)
+
+#         output = model(text, image)
+#         _, predicted = torch.max(output.data, 1)
+#         print(f"Predicted: {predicted.item()}, True label: {label}")
+

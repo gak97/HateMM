@@ -54,6 +54,8 @@ class Text_Model(nn.Module):
             nn.ReLU(),
             nn.Linear(fc2_hidden, output_size),
         )
+        self.output_size = output_size
+
     def forward(self, xb):
         return self.network(xb)
 
@@ -63,6 +65,7 @@ class LSTM(nn.Module):
         super(LSTM, self).__init__()
         self.lstm = nn.LSTM(input_emb_size, 128)
         self.fc = nn.Linear(128*no_of_frames, 64)
+        self.output_size = 64
         
     def forward(self, x):
         # print("X Size:", x.size())
@@ -84,18 +87,92 @@ class Aud_Model(nn.Module):
             nn.ReLU(),
             nn.Linear(fc2_hidden, output_size),
         )
+        self.output_size = output_size
+
     def forward(self, xb):
         return self.network(xb)
+
+
+class RulesFromProbabilities(nn.Module):
+    def __init__(self, visual_model, textual_model, audio_model, num_classes):
+        super(RulesFromProbabilities, self).__init__()
+        self.visual_model = visual_model
+        self.textual_model = textual_model
+        self.audio_model = audio_model
+        self.num_classes = num_classes
+        # self.dropout = nn.Dropout(dropout_rate)
+        self.visual_classifier = nn.Linear(visual_model.output_size, num_classes)
+        self.textual_classifier = nn.Linear(textual_model.output_size, num_classes)
+        self.audio_classifier = nn.Linear(audio_model.output_size, num_classes)
+        self.final_classifier = nn.Linear(num_classes * 3, num_classes)
+
+    def forward(self, x_text, x_img, x_audio):
+        visual_output = self.visual_model(x_img)
+        textual_output = self.textual_model(x_text)
+        audio_output = self.audio_model(x_audio)
+
+        visual_probabilities = self.visual_classifier(visual_output)
+        textual_probabilities = self.textual_classifier(textual_output)
+        audio_probabilities = self.audio_classifier(audio_output)
+
+        # visual_probabilities = visual_probabilities.squeeze(1)
+
+        combined_probabilities = torch.cat((visual_probabilities, textual_probabilities, audio_probabilities), dim=1)
+        # combined_probabilities = self.dropout(combined_probabilities)
+
+        output = self.final_classifier(combined_probabilities)
+
+        return output
+
+
+class WeightingTechnique(nn.Module):
+    def __init__(self, visual_model, textual_model, audio_model, num_classes):
+        super(WeightingTechnique, self).__init__()
+        self.visual_model = visual_model
+        self.textual_model = textual_model
+        self.audio_model = audio_model
+        self.num_classes = num_classes
+        self.weight_visual = nn.Parameter(torch.randn(1, requires_grad=True))
+        self.weight_textual = nn.Parameter(torch.randn(1, requires_grad=True))
+        self.weight_audio = nn.Parameter(torch.randn(1, requires_grad=True))
+
+        # print(f"visual_model output_size: {visual_model.output_size}, textual_model output_size: {textual_model.output_size}")
+        self.classifier = nn.Linear(visual_model.output_size + textual_model.output_size + audio_model.output_size, num_classes)
+
+    def forward(self, x_text, x_img, x_audio):
+        visual_output = self.visual_model(x_img)
+        textual_output = self.textual_model(x_text)
+        audio_output = self.audio_model(x_audio)
+
+        weighted_visual = self.weight_visual * visual_output
+        weighted_textual = self.weight_textual * textual_output
+        weighted_audio = self.weight_audio * audio_output
+
+        # weighted_visual = weighted_visual.squeeze(1)
+
+        combined_output = torch.cat((weighted_visual, weighted_textual, weighted_audio), dim=1)
+        output = self.classifier(combined_output)
+
+        return output
     
+
+
 class Combined_model(nn.Module):
     def __init__(self, text_model, video_model, audio_model, num_classes):
         super().__init__()
         self.text_model = text_model
         self.audio_model = audio_model
         self.video_model = video_model
-        self.fc_output   = nn.Linear(3*64, num_classes)
+        self.num_classes = num_classes
+        self.fc_output = nn.Linear(3*64, num_classes)
+
+        # self.weighting_technique = WeightingTechnique(self.video_model, self.text_model, self.audio_model, num_classes)
+        # self.rules_from_probabilities = RulesFromProbabilities(self.video_model, self.text_model, self.audio_model, num_classes)
 
     def forward(self, x_text, x_vid, x_audio):
+        # out = self.weighting_technique(x_text, x_vid, x_audio)
+        # out = self.rules_from_probabilities(x_text, x_vid, x_audio)
+
         if x_text is not None:
             tex_out = self.text_model(x_text)
         else:
@@ -108,18 +185,30 @@ class Combined_model(nn.Module):
 
         if x_audio is not None:
             aud_out = self.audio_model(x_audio)
+            # aud_out = self.audio_model(x_audio).view(-1, 768*2*32)  # Reshaping to match the input size
         else:
             aud_out = torch.zeros(x_text.size(0), 64).to(x_text.device) if x_text is not None else torch.zeros(x_vid.size(0), 64).to(x_vid.device)
+            # aud_out = torch.zeros(x_text.size(0), 768*2*32).to(x_text.device) if x_text is not None else torch.zeros(x_vid.size(0), 768*2*32).to(x_vid.device)
 
         # Element-wise multiplication
         # inp = tex_out * vid_out * aud_out
         # inp = inp.view(inp.size(0), -1)
 
+        # Ensure that the input tensor shape matches the linear layer's weight tensor shape
+        # expected_input_size = 3*64
+        # if inp.size(1) < expected_input_size:
+        #     padding_size = expected_input_size - inp.size(1)
+        #     inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
+
         # inp = torch.cat((tex_out, vid_out, aud_out), dim = 1)
         # inp = torch.cat((torch.zeros_like(tex_out), vid_out, aud_out), dim = 1)
         # inp = torch.cat((tex_out, vid_out, torch.zeros_like(aud_out)), dim = 1)
         # inp = torch.cat((tex_out, torch.empty_like(vid_out), aud_out), dim = 1)
-        inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), torch.zeros_like(aud_out)), dim = 1)
+        # inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), torch.zeros_like(aud_out)), dim = 1)
+        # inp = torch.cat((tex_out, torch.zeros_like(vid_out), torch.zeros_like(aud_out)), dim = 1)
+        # inp = torch.cat((torch.zeros_like(tex_out), vid_out, torch.zeros_like(aud_out)), dim = 1)
+        inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), aud_out), dim = 1)
+        # print("Input tensor: ", inp)
         out = self.fc_output(inp)
         return out
 
@@ -199,12 +288,12 @@ class Dataset_3DCNN(data.Dataset):
 def evalMetric(y_true, y_pred):
     try:
         accuracy = accuracy_score(y_true, y_pred)
-        mf1Score = f1_score(y_true, y_pred, average='macro')
-        f1Score  = f1_score(y_true, y_pred, labels = np.unique(y_pred))
+        mf1Score = f1_score(y_true, y_pred, average='macro', zero_division='warn')
+        f1Score  = f1_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
         fpr, tpr, _ = roc_curve(y_true, y_pred)
         area_under_c = auc(fpr, tpr)
-        recallScore = recall_score(y_true, y_pred, labels = np.unique(y_pred))
-        precisionScore = precision_score(y_true, y_pred, labels = np.unique(y_pred))
+        recallScore = recall_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+        precisionScore = precision_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
     except:
         return dict({"accuracy": 0, 'mF1Score': 0, 'f1Score': 0, 'auc': 0,'precision': 0, 'recall': 0})
     return dict({"accuracy": accuracy, 'mF1Score': mf1Score, 'f1Score': f1Score, 'auc': area_under_c,
@@ -220,7 +309,8 @@ with open(FOLDER_NAME+'all_HateXPlainembedding.pkl','rb') as fp:
     textData = pickle.load(fp)
 
 # with open(FOLDER_NAME+'vgg19_audFeatureMap.pkl','rb') as fp:
-with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
+# with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
+with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
     audData = pickle.load(fp)
 
     
@@ -261,14 +351,14 @@ with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
 # Audio parameters
 input_size_text = 768
 
-input_size_audio = 40 # 1000
+input_size_audio = 768*32 # 1000
 
 fc1_hidden_audio, fc2_hidden_audio = 128, 128
 
 # training parameters
 k = 2            # number of target category
 epochs = 3
-batch_size = 16
+batch_size = 32
 learning_rate = 1e-4
 log_interval = 100
 
@@ -278,7 +368,7 @@ log_interval = 100
 #     project="hate-video-classification",
 #     config={
 #         "learning_rate": learning_rate,
-#         "architecture": "HXP + MFCC + LSTM + ViT",
+#         "architecture": "HXP + MFCC + ViT (Concatenation)",
 #         "dataset": "HateMM",
 #         "epochs": epochs,
 #         "batch_size": batch_size,
@@ -395,14 +485,13 @@ device = torch.device("cuda" if use_cuda else "cpu")   # use CPU or GPU
 params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': 2, 'pin_memory': True} if use_cuda else {}
 valParams = {'batch_size': batch_size, 'shuffle': False, 'num_workers': 2, 'pin_memory': True} if use_cuda else {}
 
-with open(FOLDER_NAME+'allFoldDetails.pkl', 'rb') as fp:
+# with open(FOLDER_NAME+'allFoldDetails.pkl', 'rb') as fp:
+with open(FOLDER_NAME+'noFoldDetails.pkl', 'rb') as fp:
     allDataAnnotation = pickle.load(fp)
 
 
 def collate_fn(batch):
-    # print("before batch:", batch)
     batch = list(filter(lambda x: x is not None, batch))
-    # print("after batch:", batch)
     if len(batch) == 0:  # Check if the batch is empty after filtering
         return None
     return torch.utils.data.dataloader.default_collate(batch)
@@ -421,79 +510,97 @@ if torch.cuda.device_count() > 1:
 
 optimizer = torch.optim.Adam(comb.parameters(), lr=learning_rate) 
 
-allF = ['fold1', 'fold2', 'fold3', 'fold4', 'fold5']
+# allF = ['fold1', 'fold2', 'fold3', 'fold4', 'fold5']
 
 
-finalOutputAccrossFold ={}
+# finalOutputAccrossFold = {}
 
-for fold in allF:
-    # train, test split
-    train_list, train_label= allDataAnnotation[fold]['train']
-    # print(train_list[0], train_label[0])
-    val_list, val_label  =  allDataAnnotation[fold]['val']
-    # print(val_list[0], val_label[0])
-    test_list, test_label  =  allDataAnnotation[fold]['test']
-    # print(test_list[0], test_label[0])
+all_train_data = []
+all_train_label = []
+all_val_data = []
+all_val_label = []
+all_test_data = []
+all_test_label = []
 
+all_train_data, all_train_label = allDataAnnotation['train']
+all_val_data, all_val_label = allDataAnnotation['val']
+all_test_data, all_test_label = allDataAnnotation['test']
 
-    train_set, valid_set , test_set = Dataset_3DCNN(train_list, train_label), Dataset_3DCNN(val_list, val_label), Dataset_3DCNN(test_list, test_label)
-    train_loader = data.DataLoader(train_set, collate_fn = collate_fn, **params)
-    test_loader = data.DataLoader(test_set, collate_fn = collate_fn, **valParams)
-    valid_loader = data.DataLoader(valid_set, collate_fn = collate_fn, **valParams)
+# for fold in allF:
+#     # train, val, test split
+#     train_list, train_label = allDataAnnotation[fold]['train']
+#     val_list, val_label =  allDataAnnotation[fold]['val']
+#     test_list, test_label =  allDataAnnotation[fold]['test']
 
+#     all_train_data.extend(train_list)
+#     all_train_label.extend(train_label)
+#     all_val_data.extend(val_list)
+#     all_val_label.extend(val_label)
+#     all_test_data.extend(test_list)
+#     all_test_label.extend(test_label)
 
-    epoch_train_losses = []
-    epoch_train_scores = []
-    epoch_test_losses = []
-    epoch_test_scores = []
+print("Train data size:", len(all_train_data), "Val data size:", len(all_val_data), "Test data size:", len(all_test_data))
+# print("Train label size:", len(all_train_label), "Val label size:", len(all_val_label), "Test label size:", len(all_test_label))
 
-    validFinalValue = None
-    testFinalValue = None
-    finalScoreAcc = 0
-    prediction  = None
-
-    # start training
-    for epoch in range(epochs):
-        # train, test model
-        train_losses, train_scores = train(log_interval, comb, device, train_loader, optimizer, epoch)
-        test_loss1, test_scores1, veValid_pred = validation(comb, device, optimizer, valid_loader, 'Valid')
-        test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
-        if (test_scores1['mF1Score']>finalScoreAcc):
-            finalScoreAcc = test_scores1['mF1Score']
-            validFinalValue = test_scores1
-            testFinalValue = test_scores
-            print("veTest_pred", len(veTest_pred))
-            prediction = {'test_list': test_list , 'test_label': test_label, 'test_pred': veTest_pred}
-
-        # save results
-        epoch_train_losses.append(train_losses)
-        epoch_train_scores.append(list(x['accuracy'] for x in train_scores))
-        epoch_test_losses.append(test_loss)
-        epoch_test_scores.append(test_scores['accuracy'])
+# train_set, valid_set , test_set = Dataset_3DCNN(train_list, train_label), Dataset_3DCNN(val_list, val_label), Dataset_3DCNN(test_list, test_label)
+train_set, valid_set , test_set = Dataset_3DCNN(all_train_data, all_train_label), Dataset_3DCNN(all_val_data, all_val_label), Dataset_3DCNN(all_test_data, all_test_label)
+train_loader = data.DataLoader(train_set, collate_fn = collate_fn, **params)
+test_loader = data.DataLoader(test_set, collate_fn = collate_fn, **valParams)
+valid_loader = data.DataLoader(valid_set, collate_fn = collate_fn, **valParams)
 
 
-        # save all train test results
-        A = np.array(epoch_train_losses)
-        B = np.array(epoch_train_scores)
-        C = np.array(epoch_test_losses)
-        D = np.array(epoch_test_scores)
-    finalOutputAccrossFold[fold] = {'validation':validFinalValue, 'test': testFinalValue, 'test_prediction': prediction}
+epoch_train_losses = []
+epoch_train_scores = []
+epoch_test_losses = []
+epoch_test_scores = []
+
+validFinalValue = None
+testFinalValue = None
+finalScoreAcc = 0
+prediction  = None
+
+# start training
+for epoch in range(epochs):
+    # train, test model
+    train_losses, train_scores = train(log_interval, comb, device, train_loader, optimizer, epoch)
+    test_loss1, test_scores1, veValid_pred = validation(comb, device, optimizer, valid_loader, 'Valid')
+    test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
+    if (test_scores1['mF1Score']>finalScoreAcc):
+        finalScoreAcc = test_scores1['mF1Score']
+        validFinalValue = test_scores1
+        testFinalValue = test_scores
+        print("veTest_pred", len(veTest_pred))
+        # prediction = {'test_list': test_list , 'test_label': test_label, 'test_pred': veTest_pred}
+
+    # save results
+    epoch_train_losses.append(train_losses)
+    epoch_train_scores.append(list(x['accuracy'] for x in train_scores))
+    epoch_test_losses.append(test_loss)
+    epoch_test_scores.append(test_scores['accuracy'])
+
+
+    # save all train test results
+    A = np.array(epoch_train_losses)
+    B = np.array(epoch_train_scores)
+    C = np.array(epoch_test_losses)
+    D = np.array(epoch_test_scores)
+# finalOutputAccrossFold[fold] = {'validation':validFinalValue, 'test': testFinalValue, 'test_prediction': prediction}
         
 
 # with open('foldWiseRes_vit_hateX_audioVGG19_lstm.p', 'wb') as fp:
-with open('foldWiseRes_vit_hxp_mfcc_lstm.pkl', 'wb') as fp:
-    pickle.dump(finalOutputAccrossFold,fp)
+# with open('foldWiseRes_vit_hxp_mfcc_lstm.pkl', 'wb') as fp:
+#     pickle.dump(finalOutputAccrossFold,fp)
         
-allValueDict ={}
-for fold in allF:
-    for val in finalOutputAccrossFold[fold]['test']:
-        try:
-            allValueDict[val].append(finalOutputAccrossFold[fold]['test'][val])
-        except:
-            allValueDict[val]=[finalOutputAccrossFold[fold]['test'][val]]
+# allValueDict ={}
+# for fold in allF:
+#     for val in finalOutputAccrossFold[fold]['test']:
+#         try:
+#             allValueDict[val].append(finalOutputAccrossFold[fold]['test'][val])
+#         except:
+#             allValueDict[val]=[finalOutputAccrossFold[fold]['test'][val]]
 
 
-for i in allValueDict:
-    print(f"{i} : Mean {np.mean(allValueDict[i])}  STD: {np.std(allValueDict[i])}")
+# for i in allValueDict:
+#     print(f"{i} : Mean {np.mean(allValueDict[i])}  STD: {np.std(allValueDict[i])}")
 
     
