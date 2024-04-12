@@ -9,16 +9,17 @@ from torch import optim
 import torch.nn as nn
 
 # path to a pretrained word embedding file
-word_emb_path = '/home/henry/glove/glove.840B.300d.txt'
+word_emb_path = '/home/diptesh/workspace/glove/glove.840B.300d.txt'
 assert(word_emb_path is not None)
 
 
-username = Path.home().name
-project_dir = Path(__file__).resolve().parent.parent
-sdk_dir = project_dir.joinpath('CMU-MultimodalSDK')
-data_dir = project_dir.joinpath('datasets')
-data_dict = {'mosi': data_dir.joinpath('MOSI'), 'mosei': data_dir.joinpath(
-    'MOSEI'), 'ur_funny': data_dir.joinpath('UR_FUNNY')}
+# username = Path.home().name
+# project_dir = Path(__file__).resolve().parent.parent
+# sdk_dir = project_dir.joinpath('CMU-MultimodalSDK')
+# data_dir = project_dir.joinpath('datasets')
+# data_dict = {'mosi': data_dir.joinpath('MOSI'), 'mosei': data_dir.joinpath(
+    # 'MOSEI'), 'ur_funny': data_dir.joinpath('UR_FUNNY')}
+data_dict = {'hatemm': '/backup/hatemm/Dataset/'}
 optimizer_dict = {'RMSprop': optim.RMSprop, 'Adam': optim.Adam}
 activation_dict = {'elu': nn.ELU, "hardshrink": nn.Hardshrink, "hardtanh": nn.Hardtanh,
                    "leakyrelu": nn.LeakyReLU, "prelu": nn.PReLU, "relu": nn.ReLU, "rrelu": nn.RReLU,

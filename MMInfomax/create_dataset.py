@@ -346,3 +346,70 @@ class MOSEI:
         else:
             print("Mode is not set properly (train/dev/test)")
             exit()
+
+class HATEMM:
+    def __init__(self, config):
+        if config.sdk_dir is None:
+            print("SDK path is not specified! Please specify first in constants/paths.py")
+            exit(0)
+        else:
+            sys.path.append(str(config.sdk_dir))
+        
+        DATA_PATH = str(config.dataset_dir)
+        CACHE_PATH = DATA_PATH + '/embedding_and_mapping.pt'
+
+        # If cached data if already exists
+        try:
+            # create folders for storing the data
+            if not os.path.exists(DATA_PATH):
+                check_call(' '.join(['mkdir', '-p', DATA_PATH]), shell=True)
+
+            # load pickle file for unaligned acoustic and visual source
+            transcript_filename = '/backup/hatemm/Dataset/all__video_vosk_audioMap.p'
+            audio_filename = '/backup/hatemm/Dataset/final_allNewData.p'
+            video_filename = '/backup/hatemm/Dataset/final_allVideos.p'
+            label_filename = '/backup/hatemm/Dataset/HateMM_annotation.csv'
+
+            with open(transcript_filename, 'rb') as f:
+                transcript = pickle.load(f) # dictionary containing video name as key and transcript as value
+            with open(audio_filename, 'rb') as f:
+                audio = pickle.load(f) # dictionary containing video name as key and audio path as value
+            with open(video_filename, 'rb') as f:
+                video = pickle.load(f) # dictionary containing video name as key and video path as value
+
+            df = pd.read_csv(label_filename)   
+            label = df['label'].values
+
+            # divide the dataset into train, val, and test in the ratio of 70:10:20
+            train_split = int(0.7*len(transcript))
+            val_split = int(0.1*len(transcript))
+            test_split = int(0.2*len(transcript))
+
+        except Exception as e:
+            print(e)
+            exit(0)
+
+        print("Train Set: {}".format(len(train_split)))
+        print("Validation Set: {}".format(len(val_split)))
+        print("Test Set: {}".format(len(test_split)))
+        word2id.default_factory = return_unk
+
+        # Save glove embeddings cache too
+        # self.pretrained_emb = pretrained_emb = load_emb(word2id, config.word_emb_path)
+        # torch.save((pretrained_emb, word2id), CACHE_PATH)
+
+        # Save pickles
+        to_pickle(train_split, DATA_PATH + 'MMInfomax/train.pkl')
+        to_pickle(val_split, DATA_PATH + 'MMInfomax/dev.pkl')
+        to_pickle(test_split, DATA_PATH + 'MMInfomax/test.pkl')
+
+    def get_data(self, mode):
+        if mode == "train":
+            return self.train, self.word2id, None
+        elif mode == "valid":
+            return self.dev, self.word2id, None
+        elif mode == "test":
+            return self.test, self.word2id, None
+        else:
+            print("Mode is not set properly (train/dev/test)")
+            exit()
