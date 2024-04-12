@@ -47,7 +47,7 @@ fix_the_random(2021)
 class Text_Model(nn.Module):
     def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size):
         super().__init__()
-        self.network=nn.Sequential(
+        self.network = nn.Sequential(
             nn.Linear(input_size, fc1_hidden),
             nn.ReLU(),
             nn.Linear(fc1_hidden, fc2_hidden),
@@ -80,7 +80,7 @@ class LSTM(nn.Module):
 class Aud_Model(nn.Module):
     def __init__(self, input_size, fc1_hidden, fc2_hidden, output_size):
         super().__init__()
-        self.network=nn.Sequential(
+        self.network = nn.Sequential(
             nn.Linear(input_size, fc1_hidden),
             nn.ReLU(),
             nn.Linear(fc1_hidden, fc2_hidden),
@@ -185,20 +185,25 @@ class Combined_model(nn.Module):
 
         if x_audio is not None:
             aud_out = self.audio_model(x_audio)
-            # aud_out = self.audio_model(x_audio).view(-1, 768*2*32)  # Reshaping to match the input size
         else:
             aud_out = torch.zeros(x_text.size(0), 64).to(x_text.device) if x_text is not None else torch.zeros(x_vid.size(0), 64).to(x_vid.device)
-            # aud_out = torch.zeros(x_text.size(0), 768*2*32).to(x_text.device) if x_text is not None else torch.zeros(x_vid.size(0), 768*2*32).to(x_vid.device)
+
+        if len(tex_out.shape) > 2:
+            tex_out = tex_out.view(tex_out.size(0), -1)
+        if len(vid_out.shape) > 2:
+            vid_out = vid_out.view(vid_out.size(0), -1)
+        if len(aud_out.shape) > 2:
+            aud_out = aud_out.view(aud_out.size(0), -1)
 
         # Element-wise multiplication
-        # inp = tex_out * vid_out * aud_out
-        # inp = inp.view(inp.size(0), -1)
+        inp = tex_out * vid_out * aud_out
+        inp = inp.view(inp.size(0), -1)
 
         # Ensure that the input tensor shape matches the linear layer's weight tensor shape
-        # expected_input_size = 3*64
-        # if inp.size(1) < expected_input_size:
-        #     padding_size = expected_input_size - inp.size(1)
-        #     inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
+        expected_input_size = 3*64
+        if inp.size(1) < expected_input_size:
+            padding_size = expected_input_size - inp.size(1)
+            inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
 
         # inp = torch.cat((tex_out, vid_out, aud_out), dim = 1)
         # inp = torch.cat((torch.zeros_like(tex_out), vid_out, aud_out), dim = 1)
@@ -207,7 +212,7 @@ class Combined_model(nn.Module):
         # inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), torch.zeros_like(aud_out)), dim = 1)
         # inp = torch.cat((tex_out, torch.zeros_like(vid_out), torch.zeros_like(aud_out)), dim = 1)
         # inp = torch.cat((torch.zeros_like(tex_out), vid_out, torch.zeros_like(aud_out)), dim = 1)
-        inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), aud_out), dim = 1)
+        # inp = torch.cat((torch.zeros_like(tex_out), torch.zeros_like(vid_out), aud_out), dim = 1)
         # print("Input tensor: ", inp)
         out = self.fc_output(inp)
         return out
@@ -224,19 +229,6 @@ class Dataset_3DCNN(data.Dataset):
     def __len__(self):
         "Denotes the total number of samples"
         return len(self.folders)
-
-    # def read_text(self,selected_folder):
-    #     print("Selected Folder:", selected_folder)
-    #     print("Exists in textData:", selected_folder in textData)
-    #     print("Exists in vidData:", selected_folder in vidData)
-    #     print("Exists in audData:", selected_folder in audData)
-    #     if selected_folder in textData and selected_folder in vidData and selected_folder in audData:
-    #         print("Text Data:", textData[selected_folder])
-    #         print("Vid Data:", vidData[selected_folder])
-    #         print("Aud Data:", audData[selected_folder])
-    #         return torch.tensor(textData[selected_folder]), torch.tensor(vidData[selected_folder]), torch.tensor(audData[selected_folder])
-    #     else:
-    #         raise ValueError(f"Data not found for {selected_folder}")
 
     def load_data_for_video(self, selected_folder):
         # print("Selected Folder:", selected_folder)
@@ -266,6 +258,10 @@ class Dataset_3DCNN(data.Dataset):
         if selected_folder in audData:
             audio_features = torch.tensor(np.array(audData[selected_folder]), dtype=torch.float32)
             # print("Audio Features:", audio_features.size())
+            audio_features = audio_features.mean(dim=0).unsqueeze(0)
+            # audio_features, _ = audio_features.max(dim=0)
+            # audio_features = audio_features.view(audio_features.size(0), -1)
+            # print("Audio feature size after flattening:", audio_features.size())
         else:
             raise ValueError(f"Audio data not found for {selected_folder}")
         
@@ -310,70 +306,37 @@ with open(FOLDER_NAME+'all_HateXPlainembedding.pkl','rb') as fp:
 
 # with open(FOLDER_NAME+'vgg19_audFeatureMap.pkl','rb') as fp:
 # with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
-with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
+with open(FOLDER_NAME+'Wav2Vec2_features_chunked.pkl','rb') as fp:
+# with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
     audData = pickle.load(fp)
-
-    
-# with open(FOLDER_NAME+'final_allVideos.pkl', 'rb') as fp:
-#     allDataAnnotation = pickle.load(fp)
-#     allVidList = list(allDataAnnotation.values())
-
-# train, test split
-# train_list, train_label= allDataAnnotation['train']
-# val_list, val_label  =  allDataAnnotation['val']
-# test_list, test_label  =  allDataAnnotation['test']
-    
-# allVidList = []
-# allVidLab = []
-
-# allVidList.extend(train_list)
-# allVidList.extend(val_list)
-# allVidList.extend(test_list)
-
-# allVidLab.extend(train_label)
-# allVidLab.extend(val_label)
-# allVidLab.extend(test_label)
-
-
-# vidData ={}
-# for i in allVidList:
-#     video_file_name = os.path.basename(i)  # This extracts just the file name
-#     video_file_name_without_extension, _ = os.path.splitext(video_file_name)
-#     pickle_file_path = os.path.join(FOLDER_NAME, "VITF_new", video_file_name_without_extension + "_vit.p")
-#     # with open(FOLDER_NAME+"VITF/"+i+"_vit.p", 'rb') as fp:
-#     try:
-#         with open(pickle_file_path, 'rb') as fp:
-#             vidData[i] = np.array(pickle.load(fp))
-#     except FileNotFoundError:
-#         print(f"File not found: {pickle_file_path}")
   
 
 # Audio parameters
 input_size_text = 768
 
-input_size_audio = 768*32 # 1000
+input_size_audio = 768 # 1000
 
 fc1_hidden_audio, fc2_hidden_audio = 128, 128
 
 # training parameters
 k = 2            # number of target category
-epochs = 3
+epochs = 20
 batch_size = 32
 learning_rate = 1e-4
 log_interval = 100
 
 
-# import wandb
-# wandb.init(
-#     project="hate-video-classification",
-#     config={
-#         "learning_rate": learning_rate,
-#         "architecture": "HXP + MFCC + ViT (Concatenation)",
-#         "dataset": "HateMM",
-#         "epochs": epochs,
-#         "batch_size": batch_size,
-#     },
-# )
+import wandb
+wandb.init(
+    project="hate-video-classification",
+    config={
+        "learning_rate": learning_rate,
+        "architecture": "HXP + WAV2VEC2 + ViT (Product Rule)",
+        "dataset": "HateMM",
+        "epochs": epochs,
+        "batch_size": batch_size,
+    },
+)
 
 
 def train(log_interval, model, device, train_loader, optimizer, epoch):
@@ -412,8 +375,8 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
-        # wandb.log({"loss": loss.item(), "accuracy": metrics['accuracy'], "f1": metrics['f1Score'], "mF1": metrics['mF1Score'], 
-        #            "auc": metrics['auc'], "precision": metrics['precision'], "recall": metrics['recall']})
+        wandb.log({"loss": loss.item(), "accuracy": metrics['accuracy'], "f1": metrics['f1Score'], "mF1": metrics['mF1Score'], 
+                   "auc": metrics['auc'], "precision": metrics['precision'], "recall": metrics['recall']})
 
         # show information
         if (batch_idx + 1) % log_interval == 0:
@@ -461,8 +424,8 @@ def validation(model, device, optimizer, test_loader, testingType = "Test"):
     # except:
     #   metrics = None
 
-    # wandb.log({f"{testingType}_loss": test_loss, f"{testingType}_accuracy": metrics['accuracy'], f"{testingType}_f1": metrics['f1Score'], f"{testingType}_mF1": metrics['mF1Score'],
-    #             f"{testingType}_auc": metrics['auc'], f"{testingType}_precision": metrics['precision'], f"{testingType}_recall": metrics['recall']})
+    wandb.log({f"{testingType}_loss": test_loss, f"{testingType}_accuracy": metrics['accuracy'], f"{testingType}_f1": metrics['f1Score'], f"{testingType}_mF1": metrics['mF1Score'],
+                f"{testingType}_auc": metrics['auc'], f"{testingType}_precision": metrics['precision'], f"{testingType}_recall": metrics['recall']})
 
     # show information
     print('\n '+testingType+' set: ({:d} samples): Average loss: {:.4f}, Accuracy: {:.2f}%, MF1 Score: {:.4f}, F1 Score: {:.4f}, Area Under Curve: {:.4f}, Precision: {:.4f}, Recall Score: {:.4f}'.format(
@@ -494,6 +457,7 @@ def collate_fn(batch):
     batch = list(filter(lambda x: x is not None, batch))
     if len(batch) == 0:  # Check if the batch is empty after filtering
         return None
+
     return torch.utils.data.dataloader.default_collate(batch)
 
 
