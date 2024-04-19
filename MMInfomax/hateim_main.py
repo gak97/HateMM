@@ -4,8 +4,8 @@ import torch
 import pickle
 import pandas as pd
 import time
-from modules.encoders import LanguageEmbeddingLayer, CPC, MMILB, RNNEncoder, SubNet
-from utils.tools import to_gpu
+from encoders import LanguageEmbeddingLayer, CPC, MMILB, RNNEncoder, SubNet
+from tools import to_gpu
 
 import torch.autograd as autograd
 import torch.nn as nn
@@ -83,17 +83,17 @@ class MMIM(nn.Module):
 
         self.text_encoder = LanguageEmbeddingLayer()
         self.visual_encoder = RNNEncoder(
-            input_size=self.d_vin, 
+            in_size=self.d_vin, 
             hidden_size=self.d_vh,
-            output_size=self.d_vout,
+            out_size=self.d_vout,
             num_layers=self.n_layer, 
             dropout=0.0,
             bidirectional=self.bidirectional)
         
         self.acoustic_encoder = RNNEncoder(
-            input_size=self.d_ain,
+            in_size=self.d_ain,
             hidden_size=self.d_ah,
-            output_size=self.d_aout,
+            out_size=self.d_aout,
             num_layers=self.n_layer,
             dropout=0.0,
             bidirectional=self.bidirectional)
