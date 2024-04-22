@@ -35,6 +35,12 @@ class MAF_visual(nn.Module):
                 text_input,
                 visual_context):
 
+        if visual_context.dim() == 2:
+            visual_context = visual_context.unsqueeze(1)
+
+        # Adjust the dimensions of visual_context to match the expected input shape
+        visual_context = visual_context.repeat(1, 1, VISUAL_MAX_LEN // visual_context.shape[-1] + 1)[:, :, :VISUAL_MAX_LEN]
+
         # print("Acoustic context shape (A) : ", acoustic_context.shape)
 
         # acoustic_context = acoustic_context.permute(0,2,1)
@@ -48,9 +54,11 @@ class MAF_visual(nn.Module):
         # print("Audio out (A) : ", audio_out.shape)
 
         # print("Visual context shape : ", visual_context.shape)
-        visual_context = visual_context.permute(0,2,1)
+        # visual_context = visual_context.permute(0,2,1)
+        visual_context = visual_context.reshape(-1, VISUAL_MAX_LEN)
         visual_context = self.visual_context_transform(visual_context.float())
-        visual_context = visual_context.permute(0,2,1)
+        visual_context = visual_context.view(text_input.size(0), -1, SOURCE_MAX_LEN)
+        # visual_context = visual_context.permute(0,2,1)
 
         video_out = self.visual_context_attention(q=text_input,
                                                     k=text_input,

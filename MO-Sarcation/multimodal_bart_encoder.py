@@ -15,7 +15,7 @@ def expand_attention_mask(mask: torch.Tensor, dtype: torch.dtype):
     # Assuming `mask` is a tensor of shape [batch_size, seq_length]
     # and contains 1s for tokens to attend to and 0s for padding tokens.
     expanded_mask = mask[:, None, None, :]
-    expanded_mask = (1.0 - expanded_mask) * torch.finfo(dtype).min
+    expanded_mask = torch.logical_not(expanded_mask) * torch.finfo(dtype).min
     return expanded_mask
 
 class MultiModalBartEncoder(BartPretrainedModel):

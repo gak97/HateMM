@@ -86,7 +86,7 @@ class HateMMDataset(data.Dataset):
                 video_data = pickle.load(fp)
                 video_features = torch.tensor(np.array(list(video_data.values())), dtype=torch.float32)
                 # video_features = torch.tensor(np.array(list(video_data.values().mean(dim=0))), dtype=torch.float32)
-                video_features = video_features.mean(dim=0)
+                video_features = video_features.mean(dim=1)
         except FileNotFoundError:
             raise ValueError(f"Video data file not found: {pickle_file_path}")
         
@@ -115,7 +115,7 @@ class HateMMDataset(data.Dataset):
         except Exception as e:
             # traceback.print_exc()
             print(f"Error loading data for index {index}: {e}")                        
-            return None, None, None, None, None
+            return None
         
 
 all_train_data, all_train_label = video_labels['train']
@@ -165,11 +165,11 @@ def train_epoch(model, data_loader):
         #     print(i, " : ", type(t))
         # batch = tuple(t.to(DEVICE) for t in batch)
         input_ids, attention_mask, acoustic_input, visual_input, labels = batch
-        print("Input IDs shape:", input_ids.shape)
-        print("Attention Mask shape:", attention_mask.shape)
-        print("Audio shape:", acoustic_input.shape)
-        print("Video shape:", visual_input.shape)
-        print("Labels shape:", labels.shape)
+        # print("Input IDs shape:", input_ids.shape)
+        # print("Attention Mask shape:", attention_mask.shape)
+        # print("Audio shape:", acoustic_input.shape)
+        # print("Video shape:", visual_input.shape)
+        # print("Labels shape:", labels.shape)
 
         input_ids, attention_mask, acoustic_input, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), acoustic_input.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
         optimizer.zero_grad()
@@ -184,6 +184,8 @@ def train_epoch(model, data_loader):
                         labels = labels)
 
         loss = outputs['loss']
+        # print("Loss : ", loss)
+        loss = loss.mean()
         epoch_train_loss += loss.item()
 
         # print("Batch wise loss : ", epoch_train_loss)
@@ -216,6 +218,7 @@ def valid_epoch(model, data_loader):
 
       logits = outputs['logits']
       loss = outputs['loss']
+      loss = loss.mean()
 
       valid_loss += loss.item()
 

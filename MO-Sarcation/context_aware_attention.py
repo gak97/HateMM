@@ -35,6 +35,8 @@ class ContextAwareAttention(nn.Module):
         self.w2_v = nn.Linear(self.dim_model, 1, bias = False)
 
     def forward(self, q, k, v, context):
+        # Reshape k to match the expected shape
+        k = k.view(k.size(0), k.size(1), -1)
 
         # print("Context shape : ", context.shape)
         # print("Dim context : ", self.dim_context, " : Dim model : ", self.dim_model)
