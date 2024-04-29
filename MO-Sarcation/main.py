@@ -6,9 +6,11 @@ from torch.utils import data
 from transformers import BartTokenizerFast
 import os
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
 
 from multimodal_bart_downstream import MultimodalBartForSequenceClassification
+from transformers import BartModel
+from audio_video_first import MultimodalAudio
 
 FOLDER_NAME = '/backup/hatemm/Dataset/'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -18,13 +20,14 @@ SOURCE_MAX_LEN = 768 # 500
 ACOUSTIC_DIM = 768
 ACOUSTIC_MAX_LEN = 1000
 VISUAL_DIM = 768 # 2048
-VISUAL_MAX_LEN = 1000 # 480
+VISUAL_MAX_LEN = 100 # 480
 
 
 with open(FOLDER_NAME + 'all__video_vosk_audioMap.pkl', 'rb') as f:
   transcript = pickle.load(f)
 
 with open(FOLDER_NAME + 'Wav2Vec2_features_chunked.pkl', 'rb') as fo:
+# with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fo:
   audio_data = pickle.load(fo)
 
 with open(FOLDER_NAME + 'noFoldDetails.pkl', 'rb') as fp:
@@ -37,24 +40,26 @@ def pad_seq(tensor, dim, max_len):
     return tensor[:max_len]
   
 
-model = MultimodalBartForSequenceClassification.from_pretrained("facebook/bart-base")
-
+# model = MultimodalBartForSequenceClassification.from_pretrained("facebook/bart-base")
+# bart_model = BartModel.from_pretrained('facebook/bart-base')
 tokenizer = BartTokenizerFast.from_pretrained('facebook/bart-base')
 # print("Tokenizer : ", tokenizer)
 
-num_param = sum(p.numel() for p in model.parameters())
+# num_param = sum(p.numel() for p in model.parameters())
 # print("Total parameters : ", num_param/1e6)
 
 
 p = {
-        # 'additional_special_tokens' : ['[CONTEXT]', '[UTTERANCE]']
-        'additional_special_tokens' : ['[UTTERANCE]']
+        'additional_special_tokens' : ['[CONTEXT]', '[UTTERANCE]']
+        # 'additional_special_tokens' : ['[UTTERANCE]']
     }
 
 tokenizer.add_special_tokens(p)
 # print("Tokenizer after adding special tokens : ", tokenizer)
 
 # print(model.resize_token_embeddings(len(tokenizer)))
+
+model = MultimodalAudio()
 
 
 class HateMMDataset(data.Dataset):
@@ -93,8 +98,9 @@ class HateMMDataset(data.Dataset):
         # Load audio data
         if video in audio_data:
             audio_features = torch.tensor(np.array(audio_data[video]), dtype=torch.float32)
-            audio_features = audio_features.mean(dim=0)
+            audio_features = audio_features.mean(dim=0) # for wav2vec2
             # audio_features, _ = audio_features.max(dim=0)
+            # audio_features = audio_features.view(audio_features.size(0), -1) # for CLAP
         else:
             raise ValueError(f"Audio data not found for {video}")
         
@@ -135,6 +141,19 @@ epochs = 20
 batch_size = 32
 log_interval = 100
 
+import wandb
+wandb.init(
+    project="hate-video-classification",
+    config={
+        "learning_rate": LEARNING_RATE,
+        "architecture": "Video -> Text -> Audio",
+        "dataset": "HateMM",
+        # "features": "BART + ViT + Wav2Vec2",
+        "epochs": epochs,
+        "batch_size": batch_size,
+    },
+)
+
 params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': 2, 'pin_memory': True} if torch.cuda.is_available() else {}
 valParams = {'batch_size': batch_size, 'shuffle': False, 'num_workers': 2, 'pin_memory': True} if torch.cuda.is_available() else {}
 
@@ -154,82 +173,91 @@ optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
 criterion = torch.nn.CrossEntropyLoss()
 
 
+from sklearn.metrics import precision_score, recall_score, f1_score
+
 def train_epoch(model, data_loader):
-      model.train()
-      epoch_train_loss = 0.0
+    model.train()
+    epoch_train_loss = 0.0
+    correct_predictions = 0
+    total_predictions = 0
+    all_preds = []
+    all_labels = []
 
-
-      for step, batch in enumerate(tqdm(data_loader, desc = 'Training Iteration')):
-        # for i, t in enumerate(batch):
-        #     print("Inside hello")
-        #     print(i, " : ", type(t))
-        # batch = tuple(t.to(DEVICE) for t in batch)
+    for step, batch in enumerate(tqdm(data_loader, desc='Training Iteration')):
         input_ids, attention_mask, acoustic_input, visual_input, labels = batch
-        # print("Input IDs shape:", input_ids.shape)
-        # print("Attention Mask shape:", attention_mask.shape)
-        # print("Audio shape:", acoustic_input.shape)
-        # print("Video shape:", visual_input.shape)
-        # print("Labels shape:", labels.shape)
 
         input_ids, attention_mask, acoustic_input, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), acoustic_input.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
         optimizer.zero_grad()
-        # print("Input ids shape : ", input_ids.shape)
-        # print("Input ids shape : ", input_ids.shape)
-        outputs = model(input_ids = input_ids,
-                        attention_mask = attention_mask,
-                        # context_input_ids = context_input_ids,
-                        # context_attention_mask = context_attention_mask,
-                        acoustic_input = acoustic_input,
-                        visual_input = visual_input,
-                        labels = labels)
+
+        outputs = model(input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        acoustic_input=acoustic_input,
+                        visual_input=visual_input,
+                        labels=labels)
 
         loss = outputs['loss']
-        # print("Loss : ", loss)
         loss = loss.mean()
         epoch_train_loss += loss.item()
 
-        # print("Batch wise loss : ", epoch_train_loss)
+        logits = outputs['logits']
+        preds = torch.argmax(logits, dim=-1)
+        correct_predictions += (preds == labels).sum().item()
+        total_predictions += labels.size(0)
+
+        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
 
         loss.backward()
         optimizer.step()
 
-      print("Epoch train loss : ", epoch_train_loss)
+        accuracy = accuracy_score(all_labels, all_preds)
+        precision = precision_score(all_labels, all_preds, average='macro')
+        recall = recall_score(all_labels, all_preds, average='macro')
+        f1 = f1_score(all_labels, all_preds, average='macro')
+
+        wandb.log({"loss": epoch_train_loss, "accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1})
+    # print("Epoch train loss : ", epoch_train_loss, "Accuracy: ", accuracy, "Precision: ", precision, "Recall: ", recall, "F1 Score: ", f1)
 
 
 def valid_epoch(model, data_loader):
-  model.eval()
-  predictions = []
-  gold = []
+    model.eval()
+    valid_loss = 0.0
+    correct_predictions = 0
+    total_predictions = 0
+    all_preds = []
+    all_labels = []
 
-  valid_loss = 0.0
-  with torch.no_grad():
-    for step, batch in enumerate(tqdm(data_loader)):
-      # batch = tuple(t.to(DEVICE) for t in batch)
-      input_ids, attention_mask, acoustic_input, visual_input, labels = batch
-      input_ids, attention_mask, acoustic_input, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), acoustic_input.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
+    with torch.no_grad():
+        for step, batch in enumerate(tqdm(data_loader, desc='Validation Iteration')):
+            input_ids, attention_mask, acoustic_input, visual_input, labels = batch
+            input_ids, attention_mask, acoustic_input, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), acoustic_input.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
 
-      outputs = model(input_ids = input_ids,
-                            attention_mask = attention_mask,
-                            # context_input_ids = context_input_ids,
-                            # context_attention_mask = context_attention_mask,
-                            acoustic_input = acoustic_input,
-                            visual_input = visual_input,
-                            labels = labels)
+            outputs = model(input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            acoustic_input=acoustic_input,
+                            visual_input=visual_input,
+                            labels=labels)
 
-      logits = outputs['logits']
-      loss = outputs['loss']
-      loss = loss.mean()
+            logits = outputs['logits']
+            loss = outputs['loss']
+            loss = loss.mean()
 
-      valid_loss += loss.item()
+            valid_loss += loss.item()
+            preds = torch.argmax(logits, dim=-1)
+            correct_predictions += (preds == labels).sum().item()
+            total_predictions += labels.size(0)
 
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
+            accuracy = accuracy_score(all_labels, all_preds)
+            precision = precision_score(all_labels, all_preds, average='macro')
+            recall = recall_score(all_labels, all_preds, average='macro')
+            f1 = f1_score(all_labels, all_preds, average='macro')
 
-      pred = logits.argmax(dim = -1)
+            wandb.log({"Valid_loss": valid_loss, "Valid_accuracy": accuracy, "Valid_precision": precision, "Valid_recall": recall, "Valid_f1": f1})
 
-      predictions.extend(pred.tolist())
-      gold.extend(labels.tolist())
-
-  return valid_loss, predictions, gold
+    return valid_loss, all_preds, all_labels
 
 
 def test_epoch(model, data_loader):
@@ -254,16 +282,14 @@ def test_epoch(model, data_loader):
                             labels = labels)
 
             logits = outputs['logits']
-
             pred = logits.argmax(dim = -1)
 
             predictions.extend(pred.tolist())
-
             gold.extend(labels.tolist())
 
-            correct += int((pred == labels).sum())
+            # correct += int((pred == labels).sum())
 
-    return correct/len(data_loader.dataset), predictions, gold
+    return predictions, gold
 
 
 class EarlyStopping:
@@ -287,39 +313,55 @@ early_stopper = EarlyStopping(patience = 15, min_delta = 0.2)
 
 
 def train_and_validation(model, train_loader, valid_loader):
-  # lowest_loss = 1e6
-  best_f1 = 0.0
-  # min_loss = 1e6
-  for epoch in range(3):
-    print("\n=============Epoch : ", epoch)
-    train_epoch(model, train_loader)
-    valid_loss, valid_pred, valid_gold = valid_epoch(model, valid_loader)
+    # lowest_loss = 1e6
+    best_f1 = 0.0
+    # min_loss = 1e6
+    for epoch in range(epochs):
+      print("\n=============Epoch : ", epoch)
+      train_epoch(model, train_loader)
+      valid_loss, valid_pred, valid_gold = valid_epoch(model, valid_loader)
 
-    if early_stopper.early_stop(valid_loss):
-      break
+      if early_stopper.early_stop(valid_loss):
+        break
 
-    print("Length of predictions : ", len(valid_pred))
-    print("Length of gold : ", len(valid_gold))
-    print("Valid loss : ", valid_loss)
-    print("\n Valid Accuracy : ", accuracy_score(valid_gold, valid_pred))
-    print("\n Valid Precision : ", precision_score(valid_gold, valid_pred, average = 'weighted'))
-    print("\n Valid Recall : ", recall_score(valid_gold, valid_pred, average = 'weighted'))
-    print("\nValid F1 score : ", f1_score(valid_gold, valid_pred, average = 'weighted'))
-
-
-    curr_f1 = f1_score(valid_gold, valid_pred, average = 'weighted')
-
-    curr_loss = valid_loss
-    # if((curr_f1 > best_f1) and (epoch>=4)):
-    if(curr_f1 > best_f1):
-    # if(curr_loss < min_loss):
-    # if(curr_loss < lowest_loss):
-      best_f1 = curr_f1
-      # min_loss = curr_loss
-      # print("Valid pred : ", valid_pred)
-      # print('valid_gold : ', valid_gold)
-      # torch.save(model.state_dict(), '/content/drive/MyDrive/Colab Notebooks/32/saved_model/best_case/best_model_epoch_'+str(epoch)+'_best_f1_'+str(int(best_f1*100))+'_foldNum_'+str(foldNum)+'.pt')
-      # print("model saved\n")
+      print("Length of predictions : ", len(valid_pred))
+      print("Length of gold : ", len(valid_gold))
+      print("Valid loss : ", valid_loss)
+      print("\n Valid Accuracy : ", accuracy_score(valid_gold, valid_pred))
+      print("\n Valid Precision : ", precision_score(valid_gold, valid_pred, average = 'weighted'))
+      print("\n Valid Recall : ", recall_score(valid_gold, valid_pred, average = 'weighted'))
+      print("\n Valid F1 score : ", f1_score(valid_gold, valid_pred, average = 'weighted'))
 
 
-train_and_validation(model, train_loader, valid_loader)
+      curr_f1 = f1_score(valid_gold, valid_pred, average = 'weighted')
+
+      # curr_loss = valid_loss
+      # if((curr_f1 > best_f1) and (epoch>=4)):
+      if(curr_f1 > best_f1):
+      # if(curr_loss < min_loss):
+      # if(curr_loss < lowest_loss):
+        best_f1 = curr_f1
+        # min_loss = curr_loss
+
+        # torch.save(model.state_dict(), '/content/drive/MyDrive/Colab Notebooks/32/saved_model/best_case/best_model_epoch_'+str(epoch)+'_best_f1_'+str(int(best_f1*100))+'_foldNum_'+str(foldNum)+'.pt')
+        # print("model saved\n")
+
+    return model
+
+
+model = train_and_validation(model, train_loader, valid_loader)
+
+test_pred, test_gold = test_epoch(model, test_loader)
+
+test_accuracy = accuracy_score(test_gold, test_pred)
+test_precision = precision_score(test_gold, test_pred, average = 'weighted')
+test_recall = recall_score(test_gold, test_pred, average = 'weighted')
+test_f1 = f1_score(test_gold, test_pred, average = 'weighted')
+
+wandb.log({"Test_accuracy": test_accuracy, "Test_precision": test_precision, "Test_recall": test_recall, "Test_f1": test_f1})
+
+print("Test accuracy : ", test_accuracy)
+print("Test Precision : ", test_precision)
+print("Test Recall : ", test_recall)
+print("Test F1 score : ", test_f1)
+          

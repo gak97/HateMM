@@ -1,3 +1,4 @@
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -41,10 +42,9 @@ class MultiModalBartEncoder(BartPretrainedModel):
             embed_dim
         )
 
-
-
-
         self.layers = nn.ModuleList([BartEncoderLayer(config) for _ in range(config.encoder_layers)])
+         # Create a list to store the layer class names
+        self.layer_class_names = []
 
         self.layernorm_embedding = nn.LayerNorm(embed_dim)
 
@@ -53,29 +53,15 @@ class MultiModalBartEncoder(BartPretrainedModel):
 
         # self.fusion_at_layer = [4]
         # self.fusion_at_layer = [3, 4]
-        # self.fusion_at_layer3 = [3]
-        self.fusion_at_layer4 = [4]
-        self.fusion_at_layer5 = [5]
+        self.fusion_at_layer8 = [8]
+        self.fusion_at_layer9 = [9]
+        # self.fusion_at_layer5 = [5]
 
         # self.fusion_of_context = [3]
-        # self.visual_transformer = TransformerEncoder(d_model = VISUAL_DIM,
-        #                                              n_layers = 4,
-        #                                              n_heads=8,
-        #                                              d_ff=VISUAL_DIM
-        #                                              )
-        # self.acoustic_transformer = TransformerEncoder(d_model = ACOUSTIC_DIM,
-        #                                                n_layers=4,
-        #                                                n_heads=2,
-        #                                                d_ff=ACOUSTIC_DIM)
 
-        # self.MAF_layer3 = MAF(dim_model=embed_dim,
-        #                      dropout_rate=0.2)
+        self.MAF_layer9 = MAF_acoustic(dim_model=embed_dim, dropout_rate=0.2)
 
-        self.MAF_layer4 = MAF_acoustic(dim_model=embed_dim,
-                             dropout_rate=0.2)
-
-        self.MAF_layer5 = MAF_visual(dim_model=embed_dim,
-                             dropout_rate=0.2)
+        self.MAF_layer8 = MAF_visual(dim_model=embed_dim, dropout_rate=0.2)
 
         # self.context_encoder = ContextEncoder(config)
 
@@ -120,12 +106,7 @@ class MultiModalBartEncoder(BartPretrainedModel):
                 # print("Input ids shape : ", input_ids.shape)
                 inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
-            # print("Input shape type : ", type(input_shape))
-            # print("Input shape : ", input_shape)
             input_shape = torch.tensor(input_shape)
-            # print("Input shape type : ", type(input_shape))
-            # print("Input shape : ", input_shape)
-            # print("Input shape : ", input_shape.shape)
             embed_pos = self.embed_positions(input_ids)
             # embed_pos = self.embed_positions(input_shape)
 
@@ -152,6 +133,7 @@ class MultiModalBartEncoder(BartPretrainedModel):
 
             for idx, encoder_layer in enumerate(self.layers):
                 # print("============Idx : ", idx)
+                # print("Encoder layer : ", encoder_layer)
 
                 # if idx in self.fusion_at_layer3:
                 #     # print("Acoustic input shape (B) : ", acoustic_input)
@@ -169,7 +151,7 @@ class MultiModalBartEncoder(BartPretrainedModel):
                 #   hidden_states = self.context_encoder(hidden_states = hidden_states, context_input_ids = context_input_ids, context_attention_mask = context_attention_mask)
 
 
-                if idx in self.fusion_at_layer4:
+                if idx in self.fusion_at_layer9:
                     # print("Acoustic input shape (B) : ", acoustic_input)
                     # acoustic_input = self.acoustic_transformer(acoustic_input)[-1]
                     # print("Acoustic input shape (C) : ", acoustic_input)
@@ -177,17 +159,17 @@ class MultiModalBartEncoder(BartPretrainedModel):
                     # visual_input = self.visual_transformer(visual_input)[-1]
                     # print("====Idx inside fusion at layer :", idx)
 
-                    hidden_states = self.MAF_layer4(text_input = hidden_states,
+                    hidden_states = self.MAF_layer9(text_input = hidden_states,
                                                    acoustic_context = acoustic_input
                                                    )
-                if idx in self.fusion_at_layer5:
+                if idx in self.fusion_at_layer8:
                     # print("Acoustic input shape (B) : ", acoustic_input)
                     # acoustic_input = self.acoustic_transformer(acoustic_input)[-1]
                     # print("Acoustic input shape (C) : ", acoustic_input)
 
                     # visual_input = self.visual_transformer(visual_input)[-1]
                     # print("====Idx inside fusion at layer :", idx)
-                    hidden_states = self.MAF_layer5(text_input = hidden_states,
+                    hidden_states = self.MAF_layer8(text_input = hidden_states,
                                                    visual_context = visual_input)
 
                 if output_hidden_states:
@@ -241,3 +223,19 @@ class MultiModalBartEncoder(BartPretrainedModel):
             # print("Hidden states shape : ", hidden_states)
 
             # cls = hidden_states.permute(1,0,2)
+
+
+# # Create an instance of BartConfig
+# config = BartConfig()
+
+# # Print the original layers before any changes
+# print("Original BartConfig layers: ", config)
+
+# # Create a new instance of MultiModalBartEncoder with the original config
+# encoder = MultiModalBartEncoder(config)
+
+# # Get the updated config with the fusion layers
+# updated_config = encoder.config
+
+# # Print the updated layers after fusion layers are inserted
+# print("\nUpdated layers after fusion: ", updated_config)

@@ -21,9 +21,9 @@ class ContextAwareAttention(nn.Module):
                                                      num_heads = 1,
                                                      dropout = self.dropout_rate,
                                                      bias = True,
-                                                    add_zero_attn=False,
-                                                    batch_first=True,
-                                                    device=DEVICE
+                                                     add_zero_attn=False,
+                                                     batch_first=True,
+                                                     device=DEVICE
         )
 
         self.u_k = nn.Linear(self.dim_context, self.dim_model, bias = False)
