@@ -15,6 +15,16 @@ from visual_fusion import MAF_visual
 def expand_attention_mask(mask: torch.Tensor, dtype: torch.dtype):
     # Assuming `mask` is a tensor of shape [batch_size, seq_length]
     # and contains 1s for tokens to attend to and 0s for padding tokens.
+    # print("Mask shape : ", mask.shape)
+    expanded_mask = mask[:, None, None, :]
+    # print("Expanded mask shape : ", expanded_mask.shape)
+    expanded_mask = torch.logical_not(expanded_mask) * torch.finfo(dtype).min
+    return expanded_mask
+
+def expand_attention_mask_memes(mask: torch.Tensor, dtype: torch.dtype):
+    # Assuming `mask` is a tensor of shape [batch_size, seq_length]
+    # and contains 1s for tokens to attend to and 0s for padding tokens.
+    mask = mask.squeeze(1) # Remove the second dimension
     expanded_mask = mask[:, None, None, :]
     expanded_mask = torch.logical_not(expanded_mask) * torch.finfo(dtype).min
     return expanded_mask
@@ -53,15 +63,15 @@ class MultiModalBartEncoder(BartPretrainedModel):
 
         # self.fusion_at_layer = [4]
         # self.fusion_at_layer = [3, 4]
-        self.fusion_at_layer8 = [8]
-        self.fusion_at_layer9 = [9]
-        # self.fusion_at_layer5 = [5]
+        # self.fusion_at_layer8 = [8]
+        # self.fusion_at_layer9 = [9]
+        self.fusion_at_layer5 = [5]
 
         # self.fusion_of_context = [3]
 
-        self.MAF_layer9 = MAF_acoustic(dim_model=embed_dim, dropout_rate=0.2)
+        # self.MAF_layer9 = MAF_acoustic(dim_model=embed_dim, dropout_rate=0.2)
 
-        self.MAF_layer8 = MAF_visual(dim_model=embed_dim, dropout_rate=0.2)
+        self.MAF_layer5 = MAF_visual(dim_model=embed_dim, dropout_rate=0.2)
 
         # self.context_encoder = ContextEncoder(config)
 
@@ -117,7 +127,8 @@ class MultiModalBartEncoder(BartPretrainedModel):
 
             # print("attention mask shape 3 : ", attention_mask.shape)
             if attention_mask is not None:
-                attention_mask =  expand_attention_mask(attention_mask, inputs_embeds.dtype)
+                # attention_mask = expand_attention_mask(attention_mask, inputs_embeds.dtype)
+                attention_mask = expand_attention_mask_memes(attention_mask, inputs_embeds.dtype)
                 # batch_size = attention_mask.size(0)
                 # attention_mask = attention_mask.unsqueeze(1).expand(batch_size, 16, -1, -1).to(hidden_states.dtype)
                 # attention_mask = attention_mask.unsqueeze(1).repeat(32, 16, 1, 1)
@@ -151,25 +162,25 @@ class MultiModalBartEncoder(BartPretrainedModel):
                 #   hidden_states = self.context_encoder(hidden_states = hidden_states, context_input_ids = context_input_ids, context_attention_mask = context_attention_mask)
 
 
-                if idx in self.fusion_at_layer9:
+                # if idx in self.fusion_at_layer9:
+                #     # print("Acoustic input shape (B) : ", acoustic_input)
+                #     # acoustic_input = self.acoustic_transformer(acoustic_input)[-1]
+                #     # print("Acoustic input shape (C) : ", acoustic_input)
+
+                #     # visual_input = self.visual_transformer(visual_input)[-1]
+                #     # print("====Idx inside fusion at layer :", idx)
+
+                #     hidden_states = self.MAF_layer9(text_input = hidden_states,
+                #                                    acoustic_context = acoustic_input
+                #                                    )
+                if idx in self.fusion_at_layer5:
                     # print("Acoustic input shape (B) : ", acoustic_input)
                     # acoustic_input = self.acoustic_transformer(acoustic_input)[-1]
                     # print("Acoustic input shape (C) : ", acoustic_input)
 
                     # visual_input = self.visual_transformer(visual_input)[-1]
                     # print("====Idx inside fusion at layer :", idx)
-
-                    hidden_states = self.MAF_layer9(text_input = hidden_states,
-                                                   acoustic_context = acoustic_input
-                                                   )
-                if idx in self.fusion_at_layer8:
-                    # print("Acoustic input shape (B) : ", acoustic_input)
-                    # acoustic_input = self.acoustic_transformer(acoustic_input)[-1]
-                    # print("Acoustic input shape (C) : ", acoustic_input)
-
-                    # visual_input = self.visual_transformer(visual_input)[-1]
-                    # print("====Idx inside fusion at layer :", idx)
-                    hidden_states = self.MAF_layer8(text_input = hidden_states,
+                    hidden_states = self.MAF_layer5(text_input = hidden_states,
                                                    visual_context = visual_input)
 
                 if output_hidden_states:

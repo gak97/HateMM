@@ -79,26 +79,30 @@ class Dataset_ViT(data.Dataset):
             text_index = self.dataset[self.split]['id'].index(image_id)
         except ValueError:
             print(f"Warning: Invalid image_id {image_id}")
-            return None, None
+            return None
 
         # Load text and image data
         try:
             if self.split == 'train':
                 text_data = tokenizer(self.dataset[self.split]['text'][text_index], return_tensors='pt', padding='max_length', max_length=SOURCE_MAX_LEN, truncation=True)
                 image_data = torch.tensor(np.array(ImgEmbedding_train[self.modify_image_id(image_id)]))
+                audio_data = torch.tensor(torch.zeros(768))
             elif self.split == 'validation':
                 text_data = tokenizer(self.dataset[self.split]['text'][text_index], return_tensors='pt', padding='max_length', max_length=SOURCE_MAX_LEN, truncation=True)
                 image_data = torch.tensor(np.array(ImgEmbedding_val[self.modify_image_id(image_id)]))
+                audio_data = torch.tensor(torch.zeros(768))
             else:
                 text_data = tokenizer(self.dataset[self.split]['text'][text_index], return_tensors='pt', padding='max_length', max_length=SOURCE_MAX_LEN, truncation=True)
                 image_data = torch.tensor(np.array(ImgEmbedding_test[self.modify_image_id(image_id)]))
+                audio_data = torch.tensor(torch.zeros(768))
         except KeyError:
             print(f"KeyError: {image_id}")
             # Assign default values for missing data
-            text_data = torch.zeros(768)
-            image_data = torch.zeros(768)
+            text_data = torch.tensor(torch.zeros(768))
+            image_data = torch.tensor(torch.zeros(768))
+            audio_data = torch.tensor(torch.zeros(768))
 
-        return text_data, image_data
+        return text_data, image_data, audio_data
     
     def modify_image_id(self, image_id):
         # Append '.png' if not already present
@@ -113,25 +117,50 @@ class Dataset_ViT(data.Dataset):
         "Generates one sample of data"
         image_id = self.dataset[self.split]['id'][index]
         # Load data
-        X_text, X_img = self.load_data_for_image(image_id)
+        X_text, X_img, X_aud = self.load_data_for_image(image_id)
         # Load label
         y = self.dataset[self.split]['label'][index]
 
-        return torch.tensor(X_text['input_ids'], dtype=torch.long), torch.tensor(X_text['attention_mask'], dtype=torch.bool), X_img, y
+        return X_text['input_ids'], X_text['attention_mask'], X_img, X_aud, y
 
 
 def collate_fn(batch):
     text_input_ids = [x[0] for x in batch]
     text_attention_mask = [x[1] for x in batch]
     visual_input = [x[2] for x in batch]
-    labels = [x[3] for x in batch]
+    audio_input = [x[3] for x in batch]
+    label = [x[4] for x in batch]
 
+    # text_input_ids = torch.stack(text_input_ids)
+    # text_attention_mask = torch.stack(text_attention_mask)
+    # visual_input = torch.stack(visual_input)
+    # audio_input = torch.stack(audio_input)
+    # labels = torch.tensor(labels)
+
+    # return text_input_ids, text_attention_mask, visual_input, audio_input, labels
+
+    # Make sure all text tensors have the same shape
+    # text_input_ids = [txt.unsqueeze(0) if txt.ndim == 1 else txt for txt in text_input_ids]
     text_input_ids = torch.stack(text_input_ids)
+    text_input_ids = text_input_ids.squeeze(1)
+    # text_attention_mask = [txt.unsqueeze(0) if txt.ndim == 1 else txt for txt in text_attention_mask]
     text_attention_mask = torch.stack(text_attention_mask)
-    visual_input = torch.stack(visual_input)
-    labels = torch.tensor(labels)
+    text_attention_mask = text_attention_mask.squeeze(1)
+    # Make sure all image tensors have the same shape
+    image = [img.unsqueeze(0) if img.ndim == 1 else img for img in visual_input]
+    image = torch.stack(image)
+    # Make sure all audio tensors have the same shape
+    # audio = [aud.unsqueeze(0) if aud.ndim == 1 else aud for aud in audio_input]
+    audio = torch.stack(audio_input)
+    label = torch.tensor(label)
+    label = label.unsqueeze(1)
 
-    return text_input_ids, text_attention_mask, visual_input, labels
+    return text_input_ids, text_attention_mask, image, audio, label
+    # batch = list(filter(lambda x: x is not None, batch))
+    # if len(batch) == 0:  # Check if the batch is empty after filtering
+    #     return None
+
+    # return torch.utils.data.dataloader.default_collate(batch)
 
 
 # training parameters
@@ -192,13 +221,14 @@ def train_epoch(model, data_loader):
     all_labels = []
 
     for step, batch in enumerate(tqdm(data_loader, desc='Training Iteration')):
-        input_ids, attention_mask, visual_input, labels = batch
+        input_ids, attention_mask, visual_input, acoustic_input, labels = batch
 
-        input_ids, attention_mask, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
+        input_ids, attention_mask, visual_input, acoustic_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), visual_input.to(DEVICE), acoustic_input.to(DEVICE), labels.to(DEVICE)
         optimizer.zero_grad()
 
         outputs = model(input_ids=input_ids,
                         attention_mask=attention_mask,
+                        acoustic_input=acoustic_input,
                         visual_input=visual_input,
                         labels=labels)
 
@@ -236,11 +266,12 @@ def valid_epoch(model, data_loader):
 
     with torch.no_grad():
         for step, batch in enumerate(tqdm(data_loader, desc='Validation Iteration')):
-            input_ids, attention_mask, visual_input, labels = batch
-            input_ids, attention_mask, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
+            input_ids, attention_mask, visual_input, acoustic_input, labels = batch
+            input_ids, attention_mask, visual_input, acoustic_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), visual_input.to(DEVICE), acoustic_input.to(DEVICE), labels.to(DEVICE)
 
             outputs = model(input_ids=input_ids,
                             attention_mask=attention_mask,
+                            acoustic_input=acoustic_input,
                             visual_input=visual_input,
                             labels=labels)
 
@@ -274,11 +305,12 @@ def test_epoch(model, data_loader):
     correct = 0
     with torch.no_grad():
         for step, batch in enumerate(tqdm(data_loader)):
-            input_ids, attention_mask, visual_input, labels = batch
-            input_ids, attention_mask, visual_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), visual_input.to(DEVICE), labels.to(DEVICE)
+            input_ids, attention_mask, visual_input, acoustic_input, labels = batch
+            input_ids, attention_mask, visual_input, acoustic_input, labels = input_ids.to(DEVICE), attention_mask.to(DEVICE), visual_input.to(DEVICE), acoustic_input.to(DEVICE), labels.to(DEVICE)
 
             outputs = model(input_ids = input_ids,
                             attention_mask = attention_mask,
+                            acoustic_input = acoustic_input,
                             visual_input = visual_input,
                             labels = labels)
 
@@ -323,8 +355,8 @@ def train_and_validation(model, train_loader, valid_loader):
       if early_stopper.early_stop(valid_loss):
         break
 
-      print("Length of predictions : ", len(valid_pred))
-      print("Length of gold : ", len(valid_gold))
+    #   print("Length of predictions : ", len(valid_pred))
+    #   print("Length of gold : ", len(valid_gold))
       print("Valid loss : ", valid_loss)
       print("\n Valid Accuracy : ", accuracy_score(valid_gold, valid_pred))
       print("\n Valid Precision : ", precision_score(valid_gold, valid_pred, average = 'weighted'))
