@@ -6,7 +6,7 @@ from torch.utils import data
 from transformers import BartTokenizerFast
 import os
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 from multimodal_bart_downstream import MultimodalBartForSequenceClassification
 from transformers import BartModel
@@ -48,7 +48,7 @@ with open(FOLDER_NAME + 'hatememesext_test_VITembedding.pkl', 'rb') as fp:
     ImgEmbedding_test = pickle.load(fp)
 
 
-model = MultimodalBartForSequenceClassification.from_pretrained("facebook/bart-base")
+# model = MultimodalBartForSequenceClassification.from_pretrained("facebook/bart-base")
 # bart_model = BartModel.from_pretrained('facebook/bart-base')
 tokenizer = BartTokenizerFast.from_pretrained('facebook/bart-base')
 # print("Tokenizer : ", tokenizer)
@@ -64,7 +64,7 @@ p = {
 
 tokenizer.add_special_tokens(p)
 
-# model = MultimodalAudio()
+model = MultimodalAudio()
 
 
 class Dataset_ViT(data.Dataset):
@@ -165,7 +165,7 @@ def collate_fn(batch):
 
 # training parameters
 k = 2            # number of target category
-epochs = 3
+epochs = 5
 batch_size = 32
 log_interval = 100
 
@@ -174,8 +174,8 @@ log_interval = 100
 #     project="hate-memes-classification",
 #     config={
 #         "learning_rate": LEARNING_RATE,
-#         "architecture": "Video -> Text",
-#         "dataset": "HateMM",
+#         "architecture": "Image -> Text",
+#         "dataset": "Hateful Memes",
 #         # "features": "BART + ViT + Wav2Vec2",
 #         "epochs": epochs,
 #         "batch_size": batch_size,
@@ -251,8 +251,10 @@ def train_epoch(model, data_loader):
         precision = precision_score(all_labels, all_preds, average='macro')
         recall = recall_score(all_labels, all_preds, average='macro')
         f1 = f1_score(all_labels, all_preds, average='macro')
+        auc_roc = roc_auc_score(all_labels, all_preds)
 
-        # wandb.log({"Train Loss": epoch_train_loss, "Train Accuracy": accuracy, "Train Precision": precision, "Train Recall": recall, "Train F1": f1})
+        # wandb.log({"Train Loss": epoch_train_loss, "Train Accuracy": accuracy, "Train Precision": precision, 
+        #            "Train Recall": recall, "Train F1": f1, "Train ROC AUC": auc_roc})
     # print("Epoch train loss : ", epoch_train_loss, "Accuracy: ", accuracy, "Precision: ", precision, "Recall: ", recall, "F1 Score: ", f1)
 
 
@@ -291,8 +293,10 @@ def valid_epoch(model, data_loader):
             precision = precision_score(all_labels, all_preds, average='macro')
             recall = recall_score(all_labels, all_preds, average='macro')
             f1 = f1_score(all_labels, all_preds, average='macro')
+            auc_roc = roc_auc_score(all_labels, all_preds)
 
-            # wandb.log({"Validation Loss": valid_loss, "Validation Accuracy": accuracy, "Validation Precision": precision, "Validation Recall": recall, "Validation F1": f1})
+            # wandb.log({"Validation Loss": valid_loss, "Validation Accuracy": accuracy, "Validation Precision": precision, 
+            #            "Validation Recall": recall, "Validation F1": f1, "Validation ROC AUC": auc_roc})
 
     return valid_loss, all_preds, all_labels
 
@@ -358,10 +362,11 @@ def train_and_validation(model, train_loader, valid_loader):
     #   print("Length of predictions : ", len(valid_pred))
     #   print("Length of gold : ", len(valid_gold))
       print("Valid loss : ", valid_loss)
-      print("\n Valid Accuracy : ", accuracy_score(valid_gold, valid_pred))
-      print("\n Valid Precision : ", precision_score(valid_gold, valid_pred, average = 'weighted'))
-      print("\n Valid Recall : ", recall_score(valid_gold, valid_pred, average = 'weighted'))
-      print("\n Valid F1 score : ", f1_score(valid_gold, valid_pred, average = 'weighted'))
+      print("Valid Accuracy : ", accuracy_score(valid_gold, valid_pred))
+      print("Valid Precision : ", precision_score(valid_gold, valid_pred, average = 'weighted'))
+      print("Valid Recall : ", recall_score(valid_gold, valid_pred, average = 'weighted'))
+      print("Valid F1 score : ", f1_score(valid_gold, valid_pred, average = 'weighted'))
+      print("Valid AUC ROC : ", roc_auc_score(valid_gold, valid_pred))
 
       curr_f1 = f1_score(valid_gold, valid_pred, average = 'weighted')
 
@@ -382,10 +387,13 @@ test_accuracy = accuracy_score(test_gold, test_pred)
 test_precision = precision_score(test_gold, test_pred, average = 'weighted')
 test_recall = recall_score(test_gold, test_pred, average = 'weighted')
 test_f1 = f1_score(test_gold, test_pred, average = 'weighted')
+test_auc_roc = roc_auc_score(test_gold, test_pred)
 
-# wandb.log({"Test Accuracy": test_accuracy, "Test Precision": test_precision, "Test Recall": test_recall, "Test F1": test_f1})
+# wandb.log({"Test Accuracy": test_accuracy, "Test Precision": test_precision, "Test Recall": test_recall, 
+#            "Test F1": test_f1, "Test ROC AUC": test_auc_roc})
 
 print("Test accuracy : ", test_accuracy)
 print("Test Precision : ", test_precision)
 print("Test Recall : ", test_recall)
 print("Test F1 score : ", test_f1)
+print("Test AUC ROC : ", test_auc_roc)
