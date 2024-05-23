@@ -6,9 +6,9 @@ import torch
 def add_transcripts_to_pickle(directory, pickle_file):
     transcripts = {}
     for filename in os.listdir(directory):
-        if filename.endswith(".txt"):
+        if filename.endswith("whisper_tiny.txt"):
             with open(os.path.join(directory, filename), 'r') as file:
-                transcripts[filename.replace(".txt", ".mp4")] = file.read()
+                transcripts[filename.replace("_whisper_tiny.txt", ".mp4")] = file.read()
     
     if os.path.getsize(pickle_file) > 0:        
         with open(pickle_file, 'rb') as fp:
@@ -22,7 +22,7 @@ def add_transcripts_to_pickle(directory, pickle_file):
     with open(pickle_file, 'wb') as fp:
         pickle.dump(existing_data, fp)
 
-# add_transcripts_to_pickle('/backup/hatemm/Dataset/non_hate_videos/', '/backup/hatemm/Dataset/all__video_vosk_audioMap.p')
+# add_transcripts_to_pickle('/backup/hatemm/Dataset/hate_videos/', '/backup/hatemm/Dataset/all_whisper_tiny_transcripts.pkl')
 
 
 def add_audio_paths_to_pickle(directory, pickle_file):
@@ -239,20 +239,23 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 #     print(list(existing_data3.keys())[0])
 #     print(len(list(existing_data3.values())[0]))
 
-with open("/backup/hatemm/Dataset/Wav2Vec2_features_chunked.pkl", 'rb') as fo:
-    existing_data2 = pickle.load(fo)
-    print(len(existing_data2))
-    # print(list(existing_data2['hate_video_95.mp4']))
-    # print(list(existing_data2.values())[0])
-    first_value = next(iter(existing_data2.values()))
-    print(first_value.shape)
-    print(len(list(existing_data2.values())[1]))
+# with open("/backup/hatemm/Dataset/Wav2Vec2_features_chunked.pkl", 'rb') as fo:
+#     existing_data2 = pickle.load(fo)
+#     print(len(existing_data2))
+#     # print(list(existing_data2['hate_video_95.mp4']))
+#     # print(list(existing_data2.values())[0])
+#     first_value = next(iter(existing_data2.values()))
+#     print(first_value.shape)
+#     print(len(list(existing_data2.values())[1]))
+#     # find the max value of 'a' among all the tensors in the list
+#     # max_value = max(tensor[0].max().item() for tensor in existing_data2.values())
+#     # print(max_value)
 
 # with open("/backup/hatemm/Dataset/CLAP_features.pkl", 'rb') as fo:
 #     existing_data2 = pickle.load(fo)
 #     print(len(existing_data2))
 #     # print(list(existing_data2['hate_video_95.mp4']))
-#     print(list(existing_data2.values())[0])
+#     # print(list(existing_data2.values())[0])
 #     first_value = next(iter(existing_data2.values()))
 #     print(first_value.shape)
 #     print(len(list(existing_data2.values())[1]))
