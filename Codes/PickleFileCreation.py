@@ -128,15 +128,17 @@ def add_video_frames_paths_to_pickle(directory, pickle_file):
 
 def convert_list_to_dict_in_pickle_files(directory):
     for filename in os.listdir(directory):
-        if filename.endswith(".p"):
+        if filename.endswith(".pkl"):
             file_path = os.path.join(directory, filename)
             with open(file_path, 'rb') as fp:
                 data_list = pickle.load(fp)
             
-            # Extract the base filename without the .p extension, remove '_vit', and append .mp4
-            base_filename = filename[:-2]  # Remove the .p extension
-            if base_filename.endswith('_vit'):
-                base_filename = base_filename[:-4]  # Remove '_vit'
+            # Extract the base filename without the .pkl extension, remove '_vit', and append .mp4
+            base_filename = filename[:-4]  # Remove the .pkl extension
+            if base_filename.endswith('_clip'):
+                # base_filename = base_filename[:-4]  # Remove '_vit'
+                base_filename = base_filename[:-5]  # Remove '_clip'
+                # base_filename = base_filename[:-16]  # Remove '_DINOv2_features'
             video_name_key = base_filename + ".mp4"
             data_dict = {video_name_key: data_list}
             
@@ -145,7 +147,7 @@ def convert_list_to_dict_in_pickle_files(directory):
             print(f"Converted {filename} to dictionary format.")
 
 # Specify the directory containing the .p files
-VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
+VITF_FOLDER = '/backup/hatemm/Dataset/CLIP_lhs/'
 # convert_list_to_dict_in_pickle_files(VITF_FOLDER)
 
 
@@ -188,6 +190,22 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 #     print(len(list(existing_data1.values())[0]))
 #     print(len(list(existing_data1.values())[0][0]))
 
+# with open("/backup/hatemm/Dataset/CLIP_pooled/non_hate_video_289_clip.pkl", 'rb') as fo:
+#     existing_data1 = pickle.load(fo)
+#     # print(torch.tensor(list(existing_data1.values()), dtype=torch.float32))
+#     print(len(existing_data1))
+#     print(list(existing_data1.values())[0])
+#     print(len(list(existing_data1.values())[0]))
+#     print(len(list(existing_data1.values())[0][0]))
+
+# with open("/backup/hatemm/Dataset/DINOv2_lhs/non_hate_video_289_DINOv2_features.pkl", 'rb') as fo:
+#     existing_data1 = pickle.load(fo)
+#     # print(torch.tensor(list(existing_data1.values()), dtype=torch.float32))
+#     print(len(existing_data1))
+#     print(list(existing_data1.values())[0])
+#     print(len(list(existing_data1.values())[0]))
+#     print(len(list(existing_data1.values())[0][0]))
+
 # with open("/backup/hatemm/Dataset/final_allImageFrames.p", 'rb') as fo:
 #     existing_data1 = pickle.load(fo)
 #     print(len(existing_data1))
@@ -218,12 +236,12 @@ VITF_FOLDER = '/backup/hatemm/Dataset/VITF_new/'
 #         print(existing_data1[i])
 #         break
 
-# with open("/backup/hatemm/Dataset/all_hatefulmemes_train_hatexplain_embedding.pkl", 'rb') as fp:
-#     existing_data2 = pickle.load(fp)
-#     print(len(existing_data2))
-#     print(list(existing_data2.keys())[0])
-#     print(list(existing_data2.values())[0])
-#     print(len(list(existing_data2.values())[0]))
+with open("/backup/hatemm/Dataset/hatememes_ext_train_DINOv2embedding.pkl", 'rb') as fp:
+    existing_data2 = pickle.load(fp)
+    print(len(existing_data2))
+    print(list(existing_data2.keys())[0])
+    print(list(existing_data2.values())[0])
+    print(len(list(existing_data2.values())[0]))
 
 # with open("/backup/hatemm/Dataset/all_rawBERTembedding.pkl", 'rb') as fq:
 #     existing_data3 = pickle.load(fq)

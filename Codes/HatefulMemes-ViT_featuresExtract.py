@@ -8,14 +8,20 @@ from io import BytesIO
 import numpy as np
 
 from transformers import ViTFeatureExtractor, ViTModel
+from transformers import AutoProcessor, CLIPVisionModel
+from transformers import AutoImageProcessor, AutoModel
 
 from datasets import load_dataset
 dataset = load_dataset('limjiayi/hateful_memes_expanded')
 
 FOLDER_NAME = '/backup/hatemm/Dataset/'
 
-feature_extractor = ViTFeatureExtractor.from_pretrained("google/vit-base-patch16-224-in21k")
-model = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
+# feature_extractor = ViTFeatureExtractor.from_pretrained("google/vit-base-patch16-224-in21k")
+# model = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
+# model = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32")
+# processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
+processor = AutoImageProcessor.from_pretrained('facebook/dinov2-small')
+model = AutoModel.from_pretrained('facebook/dinov2-small')
 
 # Detect devices
 use_cuda = torch.cuda.is_available()                   # check if GPU exists
@@ -34,8 +40,8 @@ try:
 except FileNotFoundError:
     pass
 
-print("Starting image processing for ViT...")
-split = 'test'
+print("Starting image processing for DINOv2...")
+split = 'train'
 ImgEmbedding_train = {}
 print(f"Processing split: {split}")
 
@@ -60,7 +66,7 @@ for example in tqdm(dataset[split]):
                 image_bytes = response.content
                 image = Image.open(BytesIO(image_bytes))
                 # image = Image.open(requests.get(example['img'], stream=True).raw)
-                inputs = feature_extractor(images=image, return_tensors="pt")
+                inputs = processor(images=image, return_tensors="pt")
 
                 # Ensure input tensor is on the same device as model's weights
                 inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -79,7 +85,7 @@ for example in tqdm(dataset[split]):
             continue
             
         # Check if the pickle file already exists and has content
-        pickle_file = FOLDER_NAME + f'hatefulmemes_{split}_VITembedding.pkl'
+        pickle_file = FOLDER_NAME + f'hatememes_ext_{split}_DINOv2embedding.pkl'
         if os.path.exists(pickle_file) and os.path.getsize(pickle_file) > 0:
             with open(pickle_file, 'rb') as fp:
                 existing_data = pickle.load(fp)
@@ -110,4 +116,4 @@ for example in tqdm(dataset[split]):
         print(e)
         pass
 
-print("Image processing for hatexplain completed.")
+print("Image processing for hateful memes completed.")
