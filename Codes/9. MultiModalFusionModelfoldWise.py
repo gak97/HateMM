@@ -41,7 +41,7 @@ def fix_the_random(seed_val = 2021):
     torch.manual_seed(seed_val)
     torch.cuda.manual_seed_all(seed_val)
 
-fix_the_random(2021)
+fix_the_random(2024)
 
 
 class Text_Model(nn.Module):
@@ -196,16 +196,16 @@ class Combined_model(nn.Module):
             aud_out = aud_out.view(aud_out.size(0), -1)
 
         # Element-wise multiplication
-        inp = tex_out * vid_out * aud_out
-        inp = inp.view(inp.size(0), -1)
+        # inp = tex_out * vid_out * aud_out
+        # inp = inp.view(inp.size(0), -1)
 
         # Ensure that the input tensor shape matches the linear layer's weight tensor shape
-        expected_input_size = 3*64
-        if inp.size(1) < expected_input_size:
-            padding_size = expected_input_size - inp.size(1)
-            inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
+        # expected_input_size = 3*64
+        # if inp.size(1) < expected_input_size:
+        #     padding_size = expected_input_size - inp.size(1)
+        #     inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
 
-        # inp = torch.cat((tex_out, vid_out, aud_out), dim = 1)
+        inp = torch.cat((tex_out, vid_out, aud_out), dim = 1)
         # inp = torch.cat((torch.zeros_like(tex_out), vid_out, aud_out), dim = 1)
         # inp = torch.cat((tex_out, vid_out, torch.zeros_like(aud_out)), dim = 1)
         # inp = torch.cat((tex_out, torch.empty_like(vid_out), aud_out), dim = 1)
@@ -232,15 +232,15 @@ class Dataset_3DCNN(data.Dataset):
 
     def load_data_for_video(self, selected_folder):
         # print("Selected Folder:", selected_folder)
-        # Assuming selected_folder is the video name like 'non_hate_video_290.mp4'
         video_file_name_without_extension, _ = os.path.splitext(selected_folder)
-        pickle_file_path = os.path.join(FOLDER_NAME, "VITF_new", video_file_name_without_extension + "_vit.p")
+        # pickle_file_path = os.path.join(FOLDER_NAME, "VITF_new", video_file_name_without_extension + "_vit.pkl")
+        pickle_file_path = os.path.join(FOLDER_NAME, "CLIP_pooled", video_file_name_without_extension + "_clip.pkl")
         # print("Pickle File Path:", pickle_file_path)
         
         # Load text data
         if selected_folder in textData:
             text_features = torch.tensor(np.array(textData[selected_folder]), dtype=torch.float32)
-            # print("Text Features:", text_features.size())
+            # print("Text Features Size:", text_features.size())
         else:
             raise ValueError(f"Text data not found for {selected_folder}")
         
@@ -249,18 +249,19 @@ class Dataset_3DCNN(data.Dataset):
             with open(pickle_file_path, 'rb') as fp:
                 # video_features = torch.tensor(np.array(pickle.load(fp)))
                 video_data = pickle.load(fp)
-                video_features = torch.tensor(np.array(list(video_data.values())), dtype=torch.float32)
-                # print("Video Features:", video_features.size())
+                # video_features = torch.tensor(np.array(list(video_data.values())), dtype=torch.float32)
+                video_features = torch.stack([tensor.detach() for tensor in video_data.values()])
+                # print("Video Features Size:", video_features.size())
         except FileNotFoundError:
             raise ValueError(f"Video data file not found: {pickle_file_path}")
         
         # Load audio data
         if selected_folder in audData:
             audio_features = torch.tensor(np.array(audData[selected_folder]), dtype=torch.float32)
-            # print("Audio Features:", audio_features.size())
-            audio_features = audio_features.mean(dim=0).unsqueeze(0)
+            # print("Audio Features Size:", audio_features.size())
+            # audio_features = audio_features.mean(dim=0).unsqueeze(0) # for wav2vec2
             # audio_features, _ = audio_features.max(dim=0)
-            # audio_features = audio_features.view(audio_features.size(0), -1)
+            audio_features = audio_features.view(audio_features.size(0), -1) # for CLAP
             # print("Audio feature size after flattening:", audio_features.size())
         else:
             raise ValueError(f"Audio data not found for {selected_folder}")
@@ -297,24 +298,24 @@ def evalMetric(y_true, y_pred):
 
 
 
-#loading Audio features
 import pickle
 
-with open(FOLDER_NAME+'all_HateXPlainembedding.pkl','rb') as fp:
+# with open(FOLDER_NAME+'all_HateXPlainembedding.pkl','rb') as fp:
 # with open(FOLDER_NAME+'all_rawBERTembedding.pkl','rb') as fp:
+with open(FOLDER_NAME+'all_hatemm_clap_embedding_truncated.pkl','rb') as fp:
     textData = pickle.load(fp)
 
 # with open(FOLDER_NAME+'vgg19_audFeatureMap.pkl','rb') as fp:
 # with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
-with open(FOLDER_NAME+'Wav2Vec2_features_chunked.pkl','rb') as fp:
-# with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
+# with open(FOLDER_NAME+'Wav2Vec2_features_chunked.pkl','rb') as fp:
+with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
     audData = pickle.load(fp)
   
 
 # Audio parameters
 input_size_text = 768
 
-input_size_audio = 768 # 1000
+input_size_audio = 49152  # 768 # 1000
 
 fc1_hidden_audio, fc2_hidden_audio = 128, 128
 
@@ -331,7 +332,7 @@ wandb.init(
     project="hate-video-classification",
     config={
         "learning_rate": learning_rate,
-        "architecture": "HXP + WAV2VEC2 + ViT (Product Rule)",
+        "architecture": "CLAP Text + CLAP Audio + CLIP Pooled (Concatenation)",
         "dataset": "HateMM",
         "epochs": epochs,
         "batch_size": batch_size,
@@ -367,7 +368,7 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
         #loss = F.cross_entropy(output, y)
         losses.append(loss.item())
 
-            # to compute accuracy
+        # to compute accuracy
         y_pred = torch.max(output, 1)[1]  # y_pred != output
         metrics = evalMetric(y.cpu().data.squeeze().numpy(), y_pred.cpu().data.squeeze().numpy())
         scores.append(metrics)         # computed on CPU
@@ -419,10 +420,7 @@ def validation(model, device, optimizer, test_loader, testingType = "Test"):
     all_y_pred = torch.stack(all_y_pred, dim=0)
 
     print("====================")
-    # try:
     metrics = evalMetric(all_y.cpu().data.squeeze().numpy(), all_y_pred.cpu().data.squeeze().numpy())
-    # except:
-    #   metrics = None
 
     wandb.log({f"{testingType}_loss": test_loss, f"{testingType}_accuracy": metrics['accuracy'], f"{testingType}_f1": metrics['f1Score'], f"{testingType}_mF1": metrics['mF1Score'],
                 f"{testingType}_auc": metrics['auc'], f"{testingType}_precision": metrics['precision'], f"{testingType}_recall": metrics['recall']})
