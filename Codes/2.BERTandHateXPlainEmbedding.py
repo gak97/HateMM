@@ -13,11 +13,12 @@ FOLDER_NAME = '/backup/hatemm/Dataset/'
 
 import pickle, os
 # with open(FOLDER_NAME+'all__video_vosk_audioMap.p','rb') as fp:
-#     transCript = pickle.load(fp)
+with open(FOLDER_NAME+'all_whisper_tiny_transcripts.pkl','rb') as fp:
+    transCript = pickle.load(fp)
 
 
-from datasets import load_dataset
-dataset = load_dataset('limjiayi/hateful_memes_expanded')
+# from datasets import load_dataset
+# dataset = load_dataset('limjiayi/hateful_memes_expanded')
 
 
 from models import *
@@ -41,12 +42,12 @@ def tokenize(sentences, padding = True, max_len = 512):
     input_ids, attention_masks, token_type_ids = [], [], []
     for sent in sentences:
         encoded_dict = tokenizer1.encode_plus(sent,
-                                                    add_special_tokens=True,
-                                                    max_length=max_len, 
-                                                    padding='max_length', 
-                                                    return_attention_mask = True,
-                                                    return_tensors = 'pt', 
-                                                    truncation = True)
+                                            add_special_tokens=True,
+                                            max_length=max_len, 
+                                            padding='max_length', 
+                                            return_attention_mask = True,
+                                            return_tensors = 'pt', 
+                                            truncation = True)
         input_ids.append(encoded_dict['input_ids'])
         attention_masks.append(encoded_dict['attention_mask'])
         
@@ -59,93 +60,93 @@ def tokenize(sentences, padding = True, max_len = 512):
 model2 = Text_Model()
 
 
-# from tqdm import tqdm
-# allEmbedding ={}
-# for i in tqdm(transCript):
-#   try:
-#     apr = tokenize([transCript[i]])
-#     with torch.no_grad():
-#         allEmbedding[i]= (model2(apr['input_ids'], apr['attention_masks'])[2][0]).detach().numpy()
-#     del(apr)
-#   except:
-#     pass
-
-
-# len(allEmbedding)
-# with open(FOLDER_NAME+'all_HateXPlainembedding.p', 'wb') as fp:
-#     pickle.dump(allEmbedding,fp)
-
-
-# Load processed IDs from a file
-processed_hxp_ids = set()
-try:
-    with open('processed_hxp_ids.txt', 'r') as file:
-        for line in file:
-            processed_hxp_ids.add(line.strip())
-except FileNotFoundError:
+from tqdm import tqdm
+allEmbedding ={}
+for i in tqdm(transCript):
+  try:
+    apr = tokenize([transCript[i]])
+    with torch.no_grad():
+        allEmbedding[i]= (model2(apr['input_ids'], apr['attention_masks'])[2][0]).detach().numpy()
+    del(apr)
+  except:
     pass
 
-# Load skipped sample IDs from the file
-skipped_samples = set()
-with open('skipped_samples.txt', 'r') as file:
-    for line in file:
-        skipped_samples.add(line.strip())
 
-print("Starting processing for hatexplain...")
-split = 'train'
-# for split in ['train', 'validation', 'test']:
-print(f"Processing split: {split}")
-allEmbedding_hatexplain = {}
-for example in dataset[split]:
-    try:
-        text_id_hatexplain = example['id']
-        if text_id_hatexplain in skipped_samples:
-            print(f"Skipping text with ID: {text_id_hatexplain}")
-            continue
-        if text_id_hatexplain in processed_hxp_ids:
-            print(f"Skipping text with ID: {text_id_hatexplain}")
-            continue
+len(allEmbedding)
+with open(FOLDER_NAME+'all_HateXPlainembedding_whisper.pkl', 'wb') as fp:
+    pickle.dump(allEmbedding,fp)
 
-        text = example['text']
-        print(f"Processing text: {text}")
-        inputs = tokenize(text)
-        with torch.no_grad():
-            embeddings = model2(inputs['input_ids'], inputs['attention_masks'])[2][0].detach().numpy()          
-            allEmbedding_hatexplain[example['id']] = embeddings
-            # last_hidden_states = outputs.last_hidden_state
-            # allEmbedding_hatexplain[example['id']] = last_hidden_states[0][0].detach().numpy()
 
-        # Check if the pickle file already exists and has content
-        pickle_file = FOLDER_NAME + f'all_hatefulmemes_{split}_hatexplain_embedding.p'
-        if os.path.exists(pickle_file) and os.path.getsize(pickle_file) > 0:
-            with open(pickle_file, 'rb') as fp:
-                existing_data = pickle.load(fp)
-        else:
-            existing_data = {}
+# # Load processed IDs from a file
+# processed_hxp_ids = set()
+# try:
+#     with open('processed_hxp_ids.txt', 'r') as file:
+#         for line in file:
+#             processed_hxp_ids.add(line.strip())
+# except FileNotFoundError:
+#     pass
 
-        # Update the existing data
-        existing_data.update(allEmbedding_hatexplain)
+# # Load skipped sample IDs from the file
+# skipped_samples = set()
+# with open('skipped_samples.txt', 'r') as file:
+#     for line in file:
+#         skipped_samples.add(line.strip())
 
-        # Save the updated data to the pickle file
-        with open(pickle_file, 'wb') as fp:
-            pickle.dump(existing_data, fp)
+# print("Starting processing for hatexplain...")
+# split = 'train'
+# # for split in ['train', 'validation', 'test']:
+# print(f"Processing split: {split}")
+# allEmbedding_hatexplain = {}
+# for example in dataset[split]:
+#     try:
+#         text_id_hatexplain = example['id']
+#         if text_id_hatexplain in skipped_samples:
+#             print(f"Skipping text with ID: {text_id_hatexplain}")
+#             continue
+#         if text_id_hatexplain in processed_hxp_ids:
+#             print(f"Skipping text with ID: {text_id_hatexplain}")
+#             continue
 
-        # Update processed IDs set and save to file for each text example
-        if text_id_hatexplain not in processed_hxp_ids:
-            processed_hxp_ids.add(text_id_hatexplain)
-            with open('processed_hxp_ids.txt', 'a') as file:
-                file.write(text_id_hatexplain + '\n')
+#         text = example['text']
+#         print(f"Processing text: {text}")
+#         inputs = tokenize(text)
+#         with torch.no_grad():
+#             embeddings = model2(inputs['input_ids'], inputs['attention_masks'])[2][0].detach().numpy()          
+#             allEmbedding_hatexplain[example['id']] = embeddings
+#             # last_hidden_states = outputs.last_hidden_state
+#             # allEmbedding_hatexplain[example['id']] = last_hidden_states[0][0].detach().numpy()
 
-    except Exception as e:
-        print(f"Error processing text with ID: {text_id_hatexplain}. Skipping this sample.")
-        with open('skipped_samples.txt', 'a') as file:
-            file.write(f"{text_id_hatexplain}\n")
-        continue
+#         # Check if the pickle file already exists and has content
+#         pickle_file = FOLDER_NAME + f'all_hatefulmemes_{split}_hatexplain_embedding.p'
+#         if os.path.exists(pickle_file) and os.path.getsize(pickle_file) > 0:
+#             with open(pickle_file, 'rb') as fp:
+#                 existing_data = pickle.load(fp)
+#         else:
+#             existing_data = {}
 
-# with open(FOLDER_NAME + f'all_hatefulmemes_{split}_hatexplain_embedding.p', 'wb') as fp:
-#     pickle.dump(allEmbedding_hatexplain, fp)
+#         # Update the existing data
+#         existing_data.update(allEmbedding_hatexplain)
 
-print(f"Finished processing split: {split}")
+#         # Save the updated data to the pickle file
+#         with open(pickle_file, 'wb') as fp:
+#             pickle.dump(existing_data, fp)
+
+#         # Update processed IDs set and save to file for each text example
+#         if text_id_hatexplain not in processed_hxp_ids:
+#             processed_hxp_ids.add(text_id_hatexplain)
+#             with open('processed_hxp_ids.txt', 'a') as file:
+#                 file.write(text_id_hatexplain + '\n')
+
+#     except Exception as e:
+#         print(f"Error processing text with ID: {text_id_hatexplain}. Skipping this sample.")
+#         with open('skipped_samples.txt', 'a') as file:
+#             file.write(f"{text_id_hatexplain}\n")
+#         continue
+
+# # with open(FOLDER_NAME + f'all_hatefulmemes_{split}_hatexplain_embedding.p', 'wb') as fp:
+# #     pickle.dump(allEmbedding_hatexplain, fp)
+
+# print(f"Finished processing split: {split}")
 
 
 # tokenizer2 = BertTokenizer.from_pretrained("bert-base-uncased")

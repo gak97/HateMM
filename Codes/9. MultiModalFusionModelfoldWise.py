@@ -5,6 +5,7 @@ FOLDER_NAME = '/backup/hatemm/Dataset/'
 
 """
 
+import copy
 import os
 import numpy as np
 import pandas as pd
@@ -61,7 +62,7 @@ class Text_Model(nn.Module):
 
  
 class LSTM(nn.Module):
-    def __init__(self, input_emb_size = 768, no_of_frames = 100):
+    def __init__(self, input_emb_size = 768, no_of_frames = 100):   # 768 for CLIP and ViT, 384 for DINOv2
         super(LSTM, self).__init__()
         self.lstm = nn.LSTM(input_emb_size, 128)
         self.fc = nn.Linear(128*no_of_frames, 64)
@@ -235,7 +236,7 @@ class Dataset_3DCNN(data.Dataset):
         video_file_name_without_extension, _ = os.path.splitext(selected_folder)
         # pickle_file_path = os.path.join(FOLDER_NAME, "VITF_new", video_file_name_without_extension + "_vit.pkl")
         pickle_file_path = os.path.join(FOLDER_NAME, "CLIP_pooled", video_file_name_without_extension + "_clip.pkl")
-        # print("Pickle File Path:", pickle_file_path)
+        # pickle_file_path = os.path.join(FOLDER_NAME, "DINOv2_lhs", video_file_name_without_extension + "_DINOv2_features.pkl")
         
         # Load text data
         if selected_folder in textData:
@@ -249,8 +250,8 @@ class Dataset_3DCNN(data.Dataset):
             with open(pickle_file_path, 'rb') as fp:
                 # video_features = torch.tensor(np.array(pickle.load(fp)))
                 video_data = pickle.load(fp)
-                # video_features = torch.tensor(np.array(list(video_data.values())), dtype=torch.float32)
-                video_features = torch.stack([tensor.detach() for tensor in video_data.values()])
+                # video_features = torch.tensor(np.array(list(video_data.values())), dtype=torch.float32)     # for last hidden state features
+                video_features = torch.stack([tensor.detach() for tensor in video_data.values()])     # for pooled features
                 # print("Video Features Size:", video_features.size())
         except FileNotFoundError:
             raise ValueError(f"Video data file not found: {pickle_file_path}")
@@ -259,9 +260,10 @@ class Dataset_3DCNN(data.Dataset):
         if selected_folder in audData:
             audio_features = torch.tensor(np.array(audData[selected_folder]), dtype=torch.float32)
             # print("Audio Features Size:", audio_features.size())
-            # audio_features = audio_features.mean(dim=0).unsqueeze(0) # for wav2vec2
+            audio_features = audio_features.mean(dim=0).unsqueeze(0) # mean of wav2vec2 features across all frames
+            # audio_features = audio_features[0] # first frame of wav2vec2 features
             # audio_features, _ = audio_features.max(dim=0)
-            audio_features = audio_features.view(audio_features.size(0), -1) # for CLAP
+            # audio_features = audio_features.view(audio_features.size(0), -1) # for CLAP
             # print("Audio feature size after flattening:", audio_features.size())
         else:
             raise ValueError(f"Audio data not found for {selected_folder}")
@@ -300,22 +302,24 @@ def evalMetric(y_true, y_pred):
 
 import pickle
 
-# with open(FOLDER_NAME+'all_HateXPlainembedding.pkl','rb') as fp:
+# with open(FOLDER_NAME+'all_HateXPlainembedding_vosk.pkl','rb') as fp:
+# with open(FOLDER_NAME+'all_HateXPlainembedding_whisper.pkl','rb') as fp:
 # with open(FOLDER_NAME+'all_rawBERTembedding.pkl','rb') as fp:
-with open(FOLDER_NAME+'all_hatemm_clap_embedding_truncated.pkl','rb') as fp:
+# with open(FOLDER_NAME+'all_hatemm_clap_embedding_truncated.pkl','rb') as fp:
+with open(FOLDER_NAME+'all_hatemm_clip_embedding_truncated.pkl','rb') as fp:
     textData = pickle.load(fp)
 
 # with open(FOLDER_NAME+'vgg19_audFeatureMap.pkl','rb') as fp:
 # with open(FOLDER_NAME+'MFCCFeaturesNew.pkl','rb') as fp:
-# with open(FOLDER_NAME+'Wav2Vec2_features_chunked.pkl','rb') as fp:
-with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
+with open(FOLDER_NAME+'Wav2Vec2_features_chunked.pkl','rb') as fp:
+# with open(FOLDER_NAME+'CLAP_features.pkl','rb') as fp:
     audData = pickle.load(fp)
   
 
 # Audio parameters
-input_size_text = 768
+input_size_text = 512   # 512 for CLIP, 768 for HXP, BERT and CLAP
 
-input_size_audio = 49152  # 768 # 1000
+input_size_audio = 768   # 49152 for CLAP, 768 for Wav2Vec2, 1000 for AudioVGG19, 40 for MFCC
 
 fc1_hidden_audio, fc2_hidden_audio = 128, 128
 
@@ -332,7 +336,7 @@ wandb.init(
     project="hate-video-classification",
     config={
         "learning_rate": learning_rate,
-        "architecture": "CLAP Text + CLAP Audio + CLIP Pooled (Concatenation)",
+        "architecture": "CLIP Text + Wav2Vec2 + CLIP Pooled (Concatenation)",
         "dataset": "HateMM",
         "epochs": epochs,
         "batch_size": batch_size,
@@ -522,32 +526,34 @@ finalScoreAcc = 0
 prediction  = None
 
 # start training
-for epoch in range(epochs):
+for epoch in tqdm(range(epochs)):
     # train, test model
     train_losses, train_scores = train(log_interval, comb, device, train_loader, optimizer, epoch)
     test_loss1, test_scores1, veValid_pred = validation(comb, device, optimizer, valid_loader, 'Valid')
-    test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
+    # test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
     if (test_scores1['mF1Score']>finalScoreAcc):
         finalScoreAcc = test_scores1['mF1Score']
         validFinalValue = test_scores1
-        testFinalValue = test_scores
-        print("veTest_pred", len(veTest_pred))
+        # testFinalValue = test_scores
+        # print("veTest_pred", len(veTest_pred))
         # prediction = {'test_list': test_list , 'test_label': test_label, 'test_pred': veTest_pred}
 
     # save results
     epoch_train_losses.append(train_losses)
     epoch_train_scores.append(list(x['accuracy'] for x in train_scores))
-    epoch_test_losses.append(test_loss)
-    epoch_test_scores.append(test_scores['accuracy'])
+    # epoch_test_losses.append(test_loss)
+    # epoch_test_scores.append(test_scores['accuracy'])
 
 
-    # save all train test results
-    A = np.array(epoch_train_losses)
-    B = np.array(epoch_train_scores)
-    C = np.array(epoch_test_losses)
-    D = np.array(epoch_test_scores)
+    # # save all train test results
+    # A = np.array(epoch_train_losses)
+    # B = np.array(epoch_train_scores)
+    # C = np.array(epoch_test_losses)
+    # D = np.array(epoch_test_scores)
 # finalOutputAccrossFold[fold] = {'validation':validFinalValue, 'test': testFinalValue, 'test_prediction': prediction}
-        
+
+test_loss, test_scores, veTest_pred = validation(comb, device, optimizer, test_loader, 'Test')
+# print("Test Scores:", test_scores)
 
 # with open('foldWiseRes_vit_hateX_audioVGG19_lstm.p', 'wb') as fp:
 # with open('foldWiseRes_vit_hxp_mfcc_lstm.pkl', 'wb') as fp:
@@ -564,5 +570,3 @@ for epoch in range(epochs):
 
 # for i in allValueDict:
 #     print(f"{i} : Mean {np.mean(allValueDict[i])}  STD: {np.std(allValueDict[i])}")
-
-    
