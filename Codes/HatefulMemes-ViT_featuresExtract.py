@@ -8,7 +8,7 @@ from io import BytesIO
 import numpy as np
 
 from transformers import ViTFeatureExtractor, ViTModel
-from transformers import AutoProcessor, CLIPVisionModel
+from transformers import AutoProcessor, CLIPVisionModel, CLIPVisionModelWithProjection
 from transformers import AutoImageProcessor, AutoModel
 
 from datasets import load_dataset
@@ -19,9 +19,10 @@ FOLDER_NAME = '/backup/hatemm/Dataset/'
 # feature_extractor = ViTFeatureExtractor.from_pretrained("google/vit-base-patch16-224-in21k")
 # model = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
 # model = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32")
-# processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
-processor = AutoImageProcessor.from_pretrained('facebook/dinov2-small')
-model = AutoModel.from_pretrained('facebook/dinov2-small')
+processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
+# processor = AutoImageProcessor.from_pretrained('facebook/dinov2-small')
+# model = AutoModel.from_pretrained('facebook/dinov2-small')
+model = CLIPVisionModelWithProjection.from_pretrained("openai/clip-vit-base-patch32")
 
 # Detect devices
 use_cuda = torch.cuda.is_available()                   # check if GPU exists
@@ -40,7 +41,7 @@ try:
 except FileNotFoundError:
     pass
 
-print("Starting image processing for DINOv2...")
+print("Starting image processing for CLIP...")
 split = 'train'
 ImgEmbedding_train = {}
 print(f"Processing split: {split}")
@@ -73,9 +74,10 @@ for example in tqdm(dataset[split]):
 
                 with torch.no_grad():
                     outputs = model(**inputs)
-                    last_hidden_states = outputs.last_hidden_state
-                    ImgEmbedding_train[image_id_hatexplain] = [last_hidden_states[i][0].cpu().numpy() for i in range(last_hidden_states.shape[0])]
-
+                    image_embeds = outputs.image_embeds
+                    # last_hidden_states = outputs.last_hidden_state
+                    # ImgEmbedding_train[image_id_hatexplain] = [last_hidden_states[i][0].cpu().numpy() for i in range(last_hidden_states.shape[0])]
+                    ImgEmbedding_train[image_id_hatexplain] = image_embeds[0].cpu().numpy()
             else:
                 print(f"Error downloading image: {image_id_hatexplain}")
                 continue
@@ -85,7 +87,7 @@ for example in tqdm(dataset[split]):
             continue
             
         # Check if the pickle file already exists and has content
-        pickle_file = FOLDER_NAME + f'hatememes_ext_{split}_DINOv2embedding.pkl'
+        pickle_file = FOLDER_NAME + f'hatememes_ext_{split}_CLIP_proj_embedding.pkl'
         if os.path.exists(pickle_file) and os.path.getsize(pickle_file) > 0:
             with open(pickle_file, 'rb') as fp:
                 existing_data = pickle.load(fp)

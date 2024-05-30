@@ -91,6 +91,7 @@ class Combined_model(nn.Module):
                 img_out = img_out.unsqueeze(dim=1)
         
         # inp = torch.cat((tex_out, img_out), dim=1)
+        # inp = torch.cat((torch.zeros_like(tex_out), img_out), dim=1)
         inp = tex_out * img_out # Element-wise multiplication
         inp = inp.view(inp.size(0), -1)  # Flatten the second dimension
 
@@ -100,8 +101,8 @@ class Combined_model(nn.Module):
             # print(f"Warning: Input tensor shape ({inp.size()}) does not match the expected shape for self.fc1. Padding the input tensor.")
             padding_size = expected_input_size - inp.size(1)
             inp = torch.cat([inp, torch.zeros(inp.size(0), padding_size, device=inp.device)], dim=1)
-            # inp = F.pad(inp, (0, padding_size), "constant", 0)
-            # inp = inp.view(inp.size(0), 128)
+        # #     inp = F.pad(inp, (0, padding_size), "constant", 0)
+        # #     inp = inp.view(inp.size(0), 128)
 
         # Print the shapes for debugging
         # print(f"tex_out shape: {tex_out.shape}")
@@ -133,18 +134,24 @@ class Dataset_ViT(data.Dataset):
         try:
             if self.split == 'train':
                 text_data = torch.tensor(np.array(TextEmbedding_train[image_id]))
+                # text_data = text_data.mean(dim=0)  # Average the embeddings for all tokens (CLIP)
+                text_data = text_data[0]
                 image_data = torch.tensor(np.array(ImgEmbedding_train[self.modify_image_id(image_id)]))
             elif self.split == 'validation':
                 text_data = torch.tensor(np.array(TextEmbedding_val[image_id]))
+                # text_data = text_data.mean(dim=0)  # Average the embeddings for all tokens (CLIP)
+                text_data = text_data[0]
                 image_data = torch.tensor(np.array(ImgEmbedding_val[self.modify_image_id(image_id)]))
             else:
                 text_data = torch.tensor(np.array(TextEmbedding_test[image_id]))
+                # text_data = text_data.mean(dim=0)  # Average the embeddings for all tokens (CLIP)
+                text_data = text_data[0]
                 image_data = torch.tensor(np.array(ImgEmbedding_test[self.modify_image_id(image_id)]))
         except KeyError:
             print(f"KeyError: {image_id}")
             # Assign default values for missing data
-            text_data = torch.zeros(768)
-            image_data = torch.zeros(768)
+            text_data = torch.zeros(512)    # 512 for CLIP, 768 for BERT and HXP
+            image_data = torch.zeros(384)   # 768 for CLIP and VIT, 384 for DINOv2
 
         return text_data, image_data
     
@@ -168,25 +175,34 @@ class Dataset_ViT(data.Dataset):
         return X_text, X_img, y
 
 
-with open(FOLDER_NAME + 'hatefulmemes_train_VITembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'hatememes_ext_train_VITembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'hatememes_ext_train_CLIPembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'hatememes_ext_train_DINOv2embedding.pkl', 'rb') as fp:
     ImgEmbedding_train = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_train_rawBERTembedding.pkl', 'rb') as fp:
-# with open(FOLDER_NAME + 'all_hatefulmemes_train_hatexplain_embedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememes_ext_train_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememes_ext_train_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatememes_ext_train_clip_embedding.pkl', 'rb') as fp:
     TextEmbedding_train = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_validation_rawBERTembedding.pkl', 'rb') as fp:
-# with open(FOLDER_NAME + 'all_hatefulmemes_validation_hatexplain_embedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememes_ext_validation_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememes_ext_validation_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatememes_ext_validation_clip_embedding.pkl', 'rb') as fp:
     TextEmbedding_val = pickle.load(fp)
 
-with open(FOLDER_NAME + 'hatefulmemes_validation_VITembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'hatememes_ext_validation_VITembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'hatememes_ext_validation_CLIPembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'hatememes_ext_validation_DINOv2embedding.pkl', 'rb') as fp:
     ImgEmbedding_val = pickle.load(fp)
 
-with open(FOLDER_NAME + 'all_hatefulmemes_test_rawBERTembedding.pkl', 'rb') as fp:
-# with open(FOLDER_NAME + 'all_hatefulmemes_test_hatexplain_embedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememes_ext_test_rawBERTembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'all_hatememes_ext_test_hatexplain_embedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'all_hatememes_ext_test_clip_embedding.pkl', 'rb') as fp:
     TextEmbedding_test = pickle.load(fp)
 
-with open(FOLDER_NAME + 'hatefulmemes_test_VITembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'hatememes_ext_test_VITembedding.pkl', 'rb') as fp:
+# with open(FOLDER_NAME + 'hatememes_ext_test_CLIPembedding.pkl', 'rb') as fp:
+with open(FOLDER_NAME + 'hatememes_ext_test_DINOv2embedding.pkl', 'rb') as fp:
     ImgEmbedding_test = pickle.load(fp)
 
 
@@ -217,6 +233,7 @@ def collate_fn(batch):
     # Make sure all text tensors have the same shape
     text = [t.squeeze(0) if t.ndim > 1 else t for t in text]
     text = torch.stack(text)
+
     # Make sure all image tensors have the same shape
     image = [img.unsqueeze(0) if img.ndim == 1 else img for img in image]
     image = torch.stack(image)
@@ -248,33 +265,45 @@ def l1_regularized_loss(outputs, labels, model, l1_lambda=0.001):
 
     return loss
 
-input_text_size = 768
-input_image_size = 768
+input_text_size = 512   # 512 for CLIP, 768 for BERT and HXP
+input_image_size = 384  # 768 for CLIP and VIT, 384 for DINOv2
 fc1_hidden = 128
 fc2_hidden = 128
 
 # training parameters
 num_classes = 2
 initial_lr = 1e-4
-num_epochs = 30
+num_epochs = 20
 batch_size = 32
 
 
-wandb.init(
-    project="hate-memes-classification",
-    config={
-        "learning_rate": initial_lr,
-        "architecture": "BERT + ViT (EW Product)",
-        "dataset": "Hateful Memes Extended",
-        "epochs": num_epochs,
-        "batch_size": batch_size,
-    },
-)
+# wandb.init(
+#     project="hate-memes-classification",
+#     config={
+#         "learning_rate": initial_lr,
+#         "architecture": "CLIP Text + CLIP Image (EW Product)",
+#         "dataset": "Hateful Memes",
+#         "epochs": num_epochs,
+#         "batch_size": batch_size,
+#     },
+# )
 
 ext_data = {}
 
 # DataLoaders
 for split in dataset.keys():
+    # consider only the first 8.5k samples for training, 500 for validation, and 1k for testing (hateful memes dataset)
+    if split == 'train':
+        dataset[split] = dataset[split].select(list(range(8500)))
+    elif split == 'validation':
+        dataset[split] = dataset[split].select(list(range(500)))
+    elif split == 'test':
+        dataset[split] = dataset[split].select(list(range(1000)))
+        
+    # get label statistics
+    # label_stats = np.array(dataset[split]['label'])
+    # print(f"Label statistics for {split}: {np.unique(label_stats, return_counts=True)}")
+
     ext_data[split] = Dataset_ViT(dataset, split)
 
 train_loader = data.DataLoader(ext_data['train'], batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
@@ -287,7 +316,7 @@ image_model = Image_Model(input_image_size, fc1_hidden, fc2_hidden, num_classes)
 
 model = Combined_model(text_model, image_model, num_classes).to(device)
 
- # Parallelize model to multiple GPUs
+# Parallelize model to multiple GPUs
 if torch.cuda.device_count() > 1:
     print("Using", torch.cuda.device_count(), "GPUs!")
     model = nn.DataParallel(model)
@@ -324,8 +353,8 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
             # Forward pass
             outputs = model(text, image)
             # loss = l1_regularized_loss(outputs, labels, model, l1_lambda)
-            loss = label_smoothing_loss(outputs, labels)
-            # loss = criterion(outputs, labels)
+            # loss = label_smoothing_loss(outputs, labels)
+            loss = criterion(outputs, labels)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -382,13 +411,13 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
         print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Train Accuracy: {eval_metrics(train_y_true, train_y_pred)[0]:.4f}, Validation Accuracy: {eval_metrics(val_y_true, val_y_pred)[0]:.4f}')
 
     if best_model_state is not None:
-        torch.save(best_model_state, 'best_model.pth')
+        torch.save(best_model_state, 'clipT_clipI_ew_memes.pth')
 
-train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr)
+# train_model(model, train_loader, val_loader, num_epochs, criterion, optimizer, initial_lr)
 
 # Test the model
 def test_model(model, test_loader, criterion):
-    model.load_state_dict(torch.load('best_model.pth'))
+    model.load_state_dict(torch.load('clipT_clipI_ew_memes.pth'))
     model.eval()
     test_loss = 0
     with torch.no_grad():
@@ -408,11 +437,11 @@ def test_model(model, test_loader, criterion):
             y_pred.extend(predicted.cpu().numpy())
 
         accuracy, f1, precision, recall, roc_auc = eval_metrics(y_true, y_pred)
-        wandb.log({"Test Accuracy": accuracy, "Test F1": f1, "Test Precision": precision, "Test Recall": recall, "Test ROC AUC": roc_auc})
+        # wandb.log({"Test Accuracy": accuracy, "Test F1": f1, "Test Precision": precision, "Test Recall": recall, "Test ROC AUC": roc_auc})
 
         print(f'Test Accuracy: {accuracy:.4f}, Test F1: {f1:.4f}, Test Precision: {precision:.4f}, Test Recall: {recall:.4f}, Test ROC AUC: {roc_auc:.4f}')
 
-test_model(model, test_loader, criterion)
+# test_model(model, test_loader, criterion)
 
 
 
@@ -430,3 +459,35 @@ test_model(model, test_loader, criterion)
 #         _, predicted = torch.max(output.data, 1)
 #         print(f"Predicted: {predicted.item()}, True label: {label}")
 
+
+
+model.load_state_dict(torch.load('clip_dino_memes.pth'))
+model.eval()
+test_loss = 0
+with torch.no_grad():
+    y_true = []
+    y_pred = []
+    for text, image, labels in test_loader:
+        text = text.to(device)
+        image = image.to(device)
+        labels = labels.to(device)
+
+        outputs = model(text, image)
+        loss = criterion(outputs, labels)
+        test_loss += loss.item()
+
+        _, predicted = torch.max(outputs.data, 1)
+        y_true.extend(labels.cpu().numpy())
+        y_pred.extend(predicted.cpu().numpy())
+
+    accuracy = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+    precision = precision_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+    recall = recall_score(y_true, y_pred, labels = np.unique(y_pred), zero_division='warn')
+    roc_auc = roc_auc_score(y_true, y_pred, average='weighted')
+
+    # print the actual and predicted labels for the all the test samples
+    print(f"Actual labels: {y_true}")
+    print(f"Predicted labels: {y_pred}")
+
+    print(f'Test Accuracy: {accuracy:.4f}, Test F1: {f1:.4f}, Test Precision: {precision:.4f}, Test Recall: {recall:.4f}, Test ROC AUC: {roc_auc:.4f}')
