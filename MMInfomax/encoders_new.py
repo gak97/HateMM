@@ -52,53 +52,62 @@ class MMILB(nn.Module):
 
     def forward(self, x, y, labels=None, mem=None):
         mu, logvar = self.mlp_mu(x), self.mlp_logvar(x)
-        positive = -(mu - y)**2/2./torch.exp(logvar)
-        lld = torch.mean(torch.sum(positive, -1))
+        # positive = -(mu - y)**2/2./torch.exp(logvar)
+        # lld = torch.mean(torch.sum(positive, -1))
+        # Calculate log-likelihood (lld) correctly
+        std = torch.exp(0.5 * logvar)  # Calculate standard deviation
+        dist = torch.distributions.Normal(mu, std)  # Create a Normal distribution
+        lld = dist.log_prob(y).mean()  # Calculate the mean log-likelihood of y
 
-        # pos_y = neg_y = None
+        positive_samples = None
+        negative_samples = None
         H = 0.0
         # sample_dict = {'pos':None, 'neg':None}
-        sample_output = None
+        # sample_output = None
 
         if labels is not None:
             y = self.entropy_prj(y)
             labels = labels.view(-1)  # Reshape labels to match the shape of y
             pos_mask = labels > 0
-            # neg_mask = labels < 0
+            neg_mask = labels < 0
             
             # Check if there are any positive or negative labels
             if pos_mask.any():
-                pos_y = y[pos_mask]
+                positive_samples = y[pos_mask]
                 # sample_dict['pos'] = pos_y
-                sample_output = pos_y
-            # if neg_mask.any():
-            #     neg_y = y[neg_mask]
-            #     sample_dict['neg'] = neg_y
+                # sample_output = pos_y
+            if neg_mask.any():
+                negative_samples = y[neg_mask]
+                # sample_dict['neg'] = neg_y
 
             # print(f"mem: {mem}")
             # if mem is not None and mem.get('pos', None) is not None and mem.get('neg', None) is not None:
-            if mem is not None: 
-                # pos_history = mem['pos']
-                # neg_history = mem['neg']
-                pos_history = mem
+            if mem is not None and 'pos' in mem and 'neg' in mem:
+                pos_history = mem['pos']
+                neg_history = mem['neg']
+                # pos_history = mem
+
+                # Move tensors to the correct device
+                # pos_history = [tensor.to(y.device) for tensor in pos_history]  
+                # neg_history = [tensor.to(y.device) for tensor in neg_history]
                 
-                if pos_y is not None:
-                    pos_all = torch.cat([*pos_history, pos_y], dim=0) 
+                if positive_samples is not None:
+                    pos_all = torch.cat([*pos_history, positive_samples], dim=0) 
                     mu_pos = pos_all.mean(dim=0)
                     sigma_pos = torch.mean(torch.bmm((pos_all-mu_pos).unsqueeze(-1), (pos_all-mu_pos).unsqueeze(1)), dim=0)
                 else:
                     sigma_pos = torch.eye(self.y_size // 4).to(y.device)
                 
-                # if neg_y is not None:
-                #     neg_all = torch.cat(neg_history + [neg_y], dim=0)
-                #     mu_neg = neg_all.mean(dim=0)
-                #     sigma_neg = torch.mean(torch.bmm((neg_all-mu_neg).unsqueeze(-1), (neg_all-mu_neg).unsqueeze(1)), dim=0)
-                # else:
-                #     sigma_neg = torch.eye(self.y_size // 4).to(y.device)
+                if negative_samples is not None:
+                    neg_all = torch.cat([*neg_history, negative_samples], dim=0)
+                    mu_neg = neg_all.mean(dim=0)
+                    sigma_neg = torch.mean(torch.bmm((neg_all - mu_neg).unsqueeze(-1), (neg_all - mu_neg).unsqueeze(1)), dim=0)
+                else:
+                    sigma_neg = torch.eye(self.y_size // 4).to(y.device)
                 
-                H = 0.25 * (torch.logdet(sigma_pos))
+                H = 0.25 * (torch.logdet(sigma_pos) + torch.logdet(sigma_neg))
 
-        return lld, sample_output, H
+        return lld, positive_samples, negative_samples, H
       
 class CPC(nn.Module):
     def __init__(self, x_size, y_size, n_layers=1, activation='Tanh'):
