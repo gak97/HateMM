@@ -30,23 +30,12 @@ class MemeDataset(Dataset):
             image_id = row['id']
             if not (image_id.endswith('.png') or image_id.endswith('.jpg')):
                 image_id += '.png'
-            image_url = f"https://huggingface.co/datasets/limjiayi/hateful_memes_expanded/resolve/main/img/{image_id}"
             image_path = f'/backup/hatemm/Hateful_Memes_Extended/images/{image_id}'
-            if not os.path.exists(image_path):  # Check if image already downloaded
-                try:
-                    response = requests.get(image_url)
-                    if response.status_code == 200:
-                        with open(image_path, 'wb') as f:
-                            f.write(response.content)
-                        image = Image.open(image_path).convert('RGB')
-                        self.images[image_id] = image
-                    else:
-                        print(f"Failed to download image from {image_url}")
-                except Exception as e:
-                    print(e)
-            else:
+            if os.path.exists(image_path):
                 image = Image.open(image_path).convert('RGB')
                 self.images[image_id] = image
+            else:
+                print(f"Image file {image_path} not found.")
 
     def __len__(self):
         return len(self.dataset)
@@ -65,24 +54,6 @@ class MemeDataset(Dataset):
             return None  # Skip this sample
         
         image = self.images[image_id]
-
-        # image = Image.open(row['image_path']).convert('RGB')
-        # image_url = f"https://huggingface.co/datasets/limjiayi/hateful_memes_expanded/resolve/main/img/{image_id}"
-        # response = requests.get(image_url)
-        # image = Image.open(requests.get(image_url, stream=True).raw).convert('RGB')
-
-        # try:
-        #     if response.status_code == 200:
-        #         image_bytes = response.content
-        #         image = Image.open(BytesIO(image_bytes)).convert('RGB')
-        #     else:
-        #         raise Exception(f"Failed to download image from {image_url}")
-        # except Exception as e:
-        #     print(e)
-        #     return None, None
-
-        # if self.transform:
-        #     image = self.transform(image)
 
         inputs = self.processor(text=[text], images=image, return_tensors="pt", padding=True, truncation=True, max_length=77)
         inputs = {k: v.squeeze(0) for k, v in inputs.items()}  # Remove batch dimension
@@ -199,7 +170,8 @@ val_data = dataset['validation']
 test_data = dataset['test']
 
 # Prepare dataset and dataloader
-processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")  
+# processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 # transform = transforms.Compose([
 #     transforms.Resize((224, 224)),
 #     transforms.ToTensor(),
