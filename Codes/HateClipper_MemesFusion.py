@@ -13,6 +13,7 @@ import numpy as np
 import wandb
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, precision_score, recall_score
 from torchvision import transforms
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -22,24 +23,30 @@ class MemeDataset(Dataset):
         self.processor = processor
         # self.transform = transform
 
+        import os
         self.images = {}
+        os.makedirs('/backup/hatemm/Hateful_Memes_Extended/images', exist_ok=True)
         for row in tqdm(self.dataset, desc="Loading images"):
             image_id = row['id']
-            if image_id.endswith('.png') or image_id.endswith('.jpg'):
-                image_id = image_id
-            else:
+            if not (image_id.endswith('.png') or image_id.endswith('.jpg')):
                 image_id += '.png'
             image_url = f"https://huggingface.co/datasets/limjiayi/hateful_memes_expanded/resolve/main/img/{image_id}"
-            try:
-                response = requests.get(image_url)
-                if response.status_code == 200:
-                    image_bytes = response.content
-                    image = Image.open(BytesIO(image_bytes)).convert('RGB')
-                    self.images[image_id] = image
-                else:
-                    print(f"Failed to download image from {image_url}")
-            except Exception as e:
-                print(e)
+            image_path = f'/backup/hatemm/Hateful_Memes_Extended/images/{image_id}'
+            if not os.path.exists(image_path):  # Check if image already downloaded
+                try:
+                    response = requests.get(image_url)
+                    if response.status_code == 200:
+                        with open(image_path, 'wb') as f:
+                            f.write(response.content)
+                        image = Image.open(image_path).convert('RGB')
+                        self.images[image_id] = image
+                    else:
+                        print(f"Failed to download image from {image_url}")
+                except Exception as e:
+                    print(e)
+            else:
+                image = Image.open(image_path).convert('RGB')
+                self.images[image_id] = image
 
     def __len__(self):
         return len(self.dataset)
@@ -52,6 +59,10 @@ class MemeDataset(Dataset):
             image_id = image_id
         else:
             image_id += '.png'
+
+        if image_id not in self.images:
+            print(f"Image {image_id} not available.")
+            return None  # Skip this sample
         
         image = self.images[image_id]
 
@@ -91,14 +102,14 @@ class BilinearPooling(nn.Module):
         return output
 
 class CLIPClassifier(nn.Module):
-    def __init__(self, model_name="openai/clip-vit-base-patch32", dropout_rate=0.2, projection_dim=256, fusion_type='concat'):
+    def __init__(self, model_name="openai/clip-vit-large-patch14", dropout_rate=0.2, projection_dim=768, fusion_type='cross'):   # openai/clip-vit-base-patch32
         super(CLIPClassifier, self).__init__()
         self.clip_model = CLIPModel.from_pretrained(model_name)
         for param in self.clip_model.parameters():
             param.requires_grad = False
 
-        self.text_projection = nn.Linear(512, projection_dim)
-        self.image_projection = nn.Linear(512, projection_dim)
+        self.text_projection = nn.Linear(768, projection_dim)
+        self.image_projection = nn.Linear(768, projection_dim)
         self.dropout = nn.Dropout(dropout_rate)
         self.fusion_type = fusion_type
 
@@ -111,12 +122,15 @@ class CLIPClassifier(nn.Module):
             self.pre_output = nn.Linear(projection_dim, projection_dim)
 
         self.output = nn.Linear(projection_dim, 1)
-    
+
     def forward(self, input_ids, pixel_values, attention_mask=None):
         outputs = self.clip_model(input_ids=input_ids, pixel_values=pixel_values, attention_mask=attention_mask)
         text_features = self.text_projection(outputs.text_embeds)
         image_features = self.image_projection(outputs.image_embeds)
         
+        text_features = F.normalize(text_features, p=2, dim=1)
+        image_features = F.normalize(image_features, p=2, dim=1)
+
         if self.fusion_type == 'align':
             combined_features = text_features * image_features
         elif self.fusion_type == 'concat':
@@ -133,16 +147,16 @@ class CLIPClassifier(nn.Module):
         pre_output = self.dropout(pre_output)
         logits = self.output(pre_output).squeeze(1)
 
-        return logits
-    
-    # def calculate_loss(self, image_logits, text_logits, labels):
-    #     image_loss = F.binary_cross_entropy_with_logits(image_logits, labels)
-    #     text_loss = F.binary_cross_entropy_with_logits(text_logits, labels)
-    #     total_loss = self.image_weight * image_loss + self.text_weight * text_loss
-    #     return total_loss
+        return logits, text_features, image_features
 
-    def calculate_loss(self, logits, labels):
-        return F.binary_cross_entropy_with_logits(logits, labels)
+    def calculate_loss(self, logits, labels, text_features, image_features):
+        main_loss = F.binary_cross_entropy_with_logits(logits, labels)
+        text_loss = F.mse_loss(text_features, labels.unsqueeze(1).expand_as(text_features))
+        image_loss = F.mse_loss(image_features, labels.unsqueeze(1).expand_as(image_features))
+        return main_loss + 0.5 * text_loss + 0.5 * image_loss
+
+    # def calculate_loss(self, logits, labels):
+    #     return F.binary_cross_entropy_with_logits(logits, labels)
 
     def calculate_metrics(self, logits, labels):
         preds = torch.sigmoid(logits)  # Convert to probabilities
@@ -152,11 +166,15 @@ class CLIPClassifier(nn.Module):
         precision = precision_score(labels.cpu(), preds_binary.cpu(), zero_division=0)
         recall = recall_score(labels.cpu(), preds_binary.cpu(), zero_division=0)
         f1 = f1_score(labels.cpu(), preds_binary.cpu(), zero_division=0)
-        auc = roc_auc_score(labels.cpu(), preds.cpu()) if len(set(labels.cpu().numpy())) > 1 else float('nan')
+        auc = roc_auc_score(labels.cpu(), preds.cpu()) if len(set(labels.cpu().numpy())) > 1 else float('nan') # AUC is not defined when there is only one class
         
         return accuracy, precision, recall, f1, auc
 
 def collate_fn(batch):
+    batch = [item for item in batch if item is not None]  # Filter out None samples
+    if not batch:
+        return torch.tensor([]), torch.tensor([])  # Return empty tensors if batch is empty
+    
     input_ids = [item[0]['input_ids'] for item in batch]
     pixel_values = [item[0]['pixel_values'] for item in batch]
     labels = torch.stack([item[1] for item in batch])
@@ -176,9 +194,9 @@ def collate_fn(batch):
 
 # Load dataset from Hugging Face
 dataset = load_dataset('limjiayi/hateful_memes_expanded')
-train_data = dataset['train'].select(list(range(8500)))
-val_data = dataset['validation'].select(list(range(500)))
-test_data = dataset['test'].select(list(range(1000)))
+train_data = dataset['train']
+val_data = dataset['validation']
+test_data = dataset['test']
 
 # Prepare dataset and dataloader
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -192,7 +210,7 @@ train_dataset = MemeDataset(train_data, processor)
 val_dataset = MemeDataset(val_data, processor)
 test_dataset = MemeDataset(test_data, processor)
 
-batch_size = 32
+batch_size = 64
 learning_rate = 1e-4
 
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
@@ -200,7 +218,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, c
 test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
 # Instantiate model, optimizer, and loss function
-model = CLIPClassifier(fusion_type='align')
+model = CLIPClassifier(fusion_type='cross')
 model.to(device)
 
 # Parallelize model to multiple GPUs
@@ -211,7 +229,7 @@ if torch.cuda.device_count() > 1:
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 # Training loop
-num_epochs = 3  # Set the number of epochs
+num_epochs = 10  # Set the number of epochs
 
 # wandb.init(
 #     project="hate-memes-classification",
@@ -234,8 +252,8 @@ for epoch in tqdm(range(num_epochs)):
         labels = labels.to(device)
         
         optimizer.zero_grad()
-        logits = model(input_ids, pixel_values, attention_mask)
-        loss = model.module.calculate_loss(logits, labels)
+        logits, text_features, image_features = model(input_ids, pixel_values, attention_mask)
+        loss = model.module.calculate_loss(logits, labels, text_features, image_features)
         loss.backward()
         optimizer.step()
         
@@ -256,8 +274,8 @@ for epoch in tqdm(range(num_epochs)):
             pixel_values = inputs['pixel_values'].to(device)
             labels = labels.to(device)
 
-            logits = model(input_ids, pixel_values)
-            loss = model.module.calculate_loss(logits, labels)
+            logits, text_features, image_features = model(input_ids, pixel_values)
+            loss = model.module.calculate_loss(logits, labels, text_features, image_features)
             all_preds.extend(torch.sigmoid(logits).cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             val_loss += loss.item()
@@ -279,7 +297,7 @@ with torch.no_grad():
         pixel_values = inputs['pixel_values'].to(device)
         labels = labels.to(device)
 
-        logits = model(input_ids, pixel_values)
+        logits, text_features, image_features = model(input_ids, pixel_values)
         all_preds.extend(torch.sigmoid(logits).cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
 
