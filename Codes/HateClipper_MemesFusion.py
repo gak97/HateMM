@@ -1,5 +1,5 @@
 from io import BytesIO
-import requests
+import os, requests, json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,19 +18,16 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class MemeDataset(Dataset):
-    def __init__(self, dataset, processor, transform=None):
-        self.dataset = dataset
+    def __init__(self, jsonl_file, processor, transform=None):
+        self.data = []
+        with open(jsonl_file, 'r') as f:
+            for line in f:
+                self.data.append(json.loads(line))
         self.processor = processor
-        # self.transform = transform
-
-        import os
         self.images = {}
-        os.makedirs('/backup/hatemm/Hateful_Memes_Extended/images', exist_ok=True)
-        for row in tqdm(self.dataset, desc="Loading images"):
-            image_id = row['id']
-            if not (image_id.endswith('.png') or image_id.endswith('.jpg')):
-                image_id += '.png'
-            image_path = f'/backup/hatemm/Hateful_Memes_Extended/images/{image_id}'
+        for row in tqdm(self.data, desc="Loading images"):
+            image_id = row['img']
+            image_path = f'/backup/hatemm/Hateful_Memes_Extended/{image_id}'
             if os.path.exists(image_path):
                 image = Image.open(image_path).convert('RGB')
                 self.images[image_id] = image
@@ -38,16 +35,12 @@ class MemeDataset(Dataset):
                 print(f"Image file {image_path} not found.")
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        row = self.dataset[idx]
+        row = self.data[idx]
         text = row['text']
-        image_id = row['id']
-        if image_id.endswith('.png') or image_id.endswith('.jpg'):
-            image_id = image_id
-        else:
-            image_id += '.png'
+        image_id = row['img']
 
         if image_id not in self.images:
             print(f"Image {image_id} not available.")
@@ -164,10 +157,14 @@ def collate_fn(batch):
     return {'input_ids': input_ids_padded, 'pixel_values': pixel_values, 'attention_mask': attention_mask_padded}, labels
 
 # Load dataset from Hugging Face
-dataset = load_dataset('limjiayi/hateful_memes_expanded')
-train_data = dataset['train']
-val_data = dataset['validation']
-test_data = dataset['test']
+# dataset = load_dataset('limjiayi/hateful_memes_expanded')
+# train_data = dataset['train']
+# val_data = dataset['validation']
+# test_data = dataset['test']
+
+train_data = "/backup/hatemm/Hateful_Memes_Extended/train.jsonl"
+val_data = ["/backup/hatemm/Hateful_Memes_Extended/dev_seen.jsonl", "/backup/hatemm/Hateful_Memes_Extended/test_seen.jsonl"]
+test_data = ["/backup/hatemm/Hateful_Memes_Extended/dev_unseen.jsonl", "/backup/hatemm/Hateful_Memes_Extended/test_unseen.jsonl"]
 
 # Prepare dataset and dataloader
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")  
@@ -179,15 +176,19 @@ processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
 # ])
 
 train_dataset = MemeDataset(train_data, processor)
-val_dataset = MemeDataset(val_data, processor)
-test_dataset = MemeDataset(test_data, processor)
+# val_dataset = MemeDataset(val_data, processor)
+# test_dataset = MemeDataset(test_data, processor)
+val_datasets = [MemeDataset(data, processor) for data in val_data]
+test_datasets = [MemeDataset(data, processor) for data in test_data]
 
 batch_size = 64
 learning_rate = 1e-4
 
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+# val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+# test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+val_dataloaders = [DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn) for dataset in val_datasets]
+test_dataloaders = [DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn) for dataset in test_datasets]
 
 # Instantiate model, optimizer, and loss function
 model = CLIPClassifier(fusion_type='cross')
@@ -240,10 +241,11 @@ for epoch in tqdm(range(num_epochs)):
     val_loss = 0.0
     all_preds = []
     all_labels = []
-    with torch.no_grad():
-        for inputs, labels in val_dataloader:
-            input_ids = inputs['input_ids'].to(device)
-            pixel_values = inputs['pixel_values'].to(device)
+    for val_dataloader in val_dataloaders:
+        with torch.no_grad():
+            for inputs, labels in val_dataloader:
+                input_ids = inputs['input_ids'].to(device)
+                pixel_values = inputs['pixel_values'].to(device)
             labels = labels.to(device)
 
             logits, text_features, image_features = model(input_ids, pixel_values)
@@ -263,15 +265,16 @@ torch.save(model.state_dict(), 'clip_classifier.pth')
 model.eval()
 all_preds = []
 all_labels = []
-with torch.no_grad():
-    for inputs, labels in test_dataloader:
-        input_ids = inputs['input_ids'].to(device)
-        pixel_values = inputs['pixel_values'].to(device)
-        labels = labels.to(device)
+for test_dataloader in test_dataloaders:
+    with torch.no_grad():
+        for inputs, labels in test_dataloader:
+            input_ids = inputs['input_ids'].to(device)
+            pixel_values = inputs['pixel_values'].to(device)
+            labels = labels.to(device)
 
-        logits, text_features, image_features = model(input_ids, pixel_values)
-        all_preds.extend(torch.sigmoid(logits).cpu().numpy())
-        all_labels.extend(labels.cpu().numpy())
+            logits, text_features, image_features = model(input_ids, pixel_values)
+            all_preds.extend(torch.sigmoid(logits).cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
 accuracy, precision, recall, f1, auc = model.module.calculate_metrics(torch.tensor(all_preds), torch.tensor(all_labels))
 print(f"Test Accuracy: {accuracy}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}, AUC: {auc}")
