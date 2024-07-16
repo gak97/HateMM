@@ -43,7 +43,9 @@ class MemeDataset(Dataset):
     def __getitem__(self, idx):
         row = self.data[idx]
         text = row['text']
-        image_id = row['img']
+        # image_id = row['img']
+        image_id = row['img'].replace('img/', 'img_masked/')
+        # image_id = row['img'].replace('img/', 'img_inpainted/')
 
         if image_id not in self.images:
             print(f"Image {image_id} not available.")
@@ -63,13 +65,13 @@ class BilinearPooling(nn.Module):
         self.fc = nn.Linear(input_dim1 * input_dim2, output_dim)
     
     def forward(self, x1, x2):
-        outer_product = torch.bmm(x1.unsqueeze(2), x2.unsqueeze(1))
-        outer_product = outer_product.view(outer_product.size(0), -1)
-        output = self.fc(outer_product)
+        outer_product = torch.bmm(x1.unsqueeze(2), x2.unsqueeze(1)) # [batch_size, input_dim1, input_dim2]
+        outer_product = outer_product.view(outer_product.size(0), -1) # [batch_size, input_dim1 * input_dim2]
+        output = self.fc(outer_product) # [batch_size, output_dim]
         return output
 
 class CLIPClassifier(nn.Module):
-    def __init__(self, model_name="openai/clip-vit-large-patch14", dropout_rate=0.1, projection_dim=512, fusion_type='cross'):
+    def __init__(self, model_name="openai/clip-vit-large-patch14", dropout_rate=0.1, projection_dim=768, fusion_type='cross'):
         super(CLIPClassifier, self).__init__()
         self.clip_model = CLIPModel.from_pretrained(model_name)
         for param in self.clip_model.parameters():
@@ -81,12 +83,18 @@ class CLIPClassifier(nn.Module):
         self.fusion_type = fusion_type
 
         if fusion_type == 'concat':
-            self.pre_output = nn.Linear(projection_dim * 2, projection_dim)
+            self.pre_output1 = nn.Linear(projection_dim * 2, projection_dim)
+            self.pre_output2 = nn.Linear(projection_dim, projection_dim)
+            self.pre_output3 = nn.Linear(projection_dim, projection_dim)
         elif fusion_type == 'cross':
             self.bilinear_pooling = BilinearPooling(projection_dim, projection_dim, projection_dim)
-            self.pre_output = nn.Linear(projection_dim, projection_dim)
+            self.pre_output1 = nn.Linear(projection_dim, projection_dim)
+            self.pre_output2 = nn.Linear(projection_dim, projection_dim)
+            self.pre_output3 = nn.Linear(projection_dim, projection_dim)
         else:
-            self.pre_output = nn.Linear(projection_dim, projection_dim)
+            self.pre_output1 = nn.Linear(projection_dim, projection_dim)
+            self.pre_output2 = nn.Linear(projection_dim, projection_dim)
+            self.pre_output3 = nn.Linear(projection_dim, projection_dim)
 
         self.output = nn.Linear(projection_dim, 1)
 
@@ -112,8 +120,12 @@ class CLIPClassifier(nn.Module):
         #     idx = torch.randperm(combined_features.size(0))
         #     combined_features = combined_features[idx]
 
-        combined_features = self.dropout(combined_features)
-        pre_output = self.pre_output(combined_features)
+        # combined_features = self.dropout(combined_features)
+        pre_output = self.pre_output1(combined_features)
+        pre_output = F.relu(pre_output)
+        pre_output = self.pre_output2(pre_output)
+        pre_output = F.relu(pre_output)
+        pre_output = self.pre_output3(pre_output)
         pre_output = self.dropout(pre_output)
         logits = self.output(pre_output).squeeze(1)
 
@@ -127,7 +139,7 @@ class CLIPClassifier(nn.Module):
         # return main_loss + 0.5 * text_loss + 0.5 * image_loss
         return F.binary_cross_entropy_with_logits(logits, labels)
 
-    def calculate_metrics(self, logits, labels, threshold=0.7):
+    def calculate_metrics(self, logits, labels, threshold=0.6):
         preds = torch.sigmoid(logits)  # Convert to probabilities
         preds_binary = (preds >= threshold).long()  # Convert to binary predictions
         
@@ -179,8 +191,10 @@ def find_optimal_threshold(y_true, y_pred):
 # test_data = dataset['test']
 
 train_data = "/backup/girish_datasets/Hateful_Memes_Extended/train.jsonl"
-val_data = ["/backup/girish_datasets/Hateful_Memes_Extended/dev_seen.jsonl", "/backup/girish_datasets/Hateful_Memes_Extended/test_seen.jsonl"]
-test_data = ["/backup/girish_datasets/Hateful_Memes_Extended/dev_unseen.jsonl", "/backup/girish_datasets/Hateful_Memes_Extended/test_unseen.jsonl"]
+# val_data = ["/backup/girish_datasets/Hateful_Memes_Extended/dev_seen.jsonl", "/backup/girish_datasets/Hateful_Memes_Extended/test_seen.jsonl"]
+val_data = ["/backup/girish_datasets/Hateful_Memes_Extended/dev_seen.jsonl"]
+# test_data = ["/backup/girish_datasets/Hateful_Memes_Extended/dev_unseen.jsonl", "/backup/girish_datasets/Hateful_Memes_Extended/test_unseen.jsonl"]
+test_data = ["/backup/girish_datasets/Hateful_Memes_Extended/test_seen.jsonl"]
 
 # Prepare dataset and dataloader
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")  
@@ -231,6 +245,10 @@ test_dataloaders = [DataLoader(dataset, batch_size=batch_size, shuffle=False, co
 model = CLIPClassifier(fusion_type='cross')
 model.to(device)
 
+# Calculate the number of parameters being fine-tuned
+num_finetune_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Number of parameters being fine-tuned: {num_finetune_params / 1e6:.2f}M")
+
 # Parallelize model to multiple GPUs
 if torch.cuda.device_count() > 1:
     print("Using", torch.cuda.device_count(), "GPUs!")
@@ -245,12 +263,13 @@ class_counts = [train_labels.count(0), train_labels.count(1)]
 total_counts = sum(class_counts)
 weights = [total_counts / class_counts[i] for i in range(len(class_counts))]
 pos_weight = torch.tensor([weights[1] / weights[0]], device=device)
+print(f"Positive Weight: {pos_weight}")
 
 # Use weighted loss
 criterion = BCEWithLogitsLoss(pos_weight=pos_weight)
 
 # Training loop
-num_epochs = 10  # Set the number of epochs
+num_epochs = 5  # Set the number of epochs
 best_f1 = 0
 best_val_auc = 0
 patience = 5
@@ -259,7 +278,7 @@ epochs_no_improve = 0
 # wandb.init(
 #     project="hate-memes-classification",
 #     config={
-#         "learning_rate": 1e-4,
+#         "learning_rate": learning_rate,
 #         "architecture": "CLIP Text + CLIP Image (Proj Finetuning)",
 #         "dataset": "Hateful Memes",
 #         "epochs": num_epochs,
@@ -291,9 +310,8 @@ for epoch in tqdm(range(num_epochs)):
     # print(f"Sample logits: {logits[:5].detach().cpu().numpy()}")
     # print(f"Sample labels: {labels[:5].cpu().numpy()}")
 
-    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {total_loss/len(train_dataloader)}")
-    # accuracy, precision, recall, f1, auc = model.module.calculate_metrics(combined_logits, labels)
-    # wandb.log({"Train Loss": total_loss/len(train_dataloader)})
+    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {total_loss/len(train_dataloader):.4f}")
+    # wandb.log({"Train Loss": round(total_loss/len(train_dataloader), 4)})
 
     # Validation
     model.eval()
@@ -319,11 +337,9 @@ for epoch in tqdm(range(num_epochs)):
     
     # optimal_threshold = find_optimal_threshold(np.array(all_labels), np.array(all_preds))
     accuracy, precision, recall, f1, auc = model.module.calculate_metrics(torch.tensor(all_preds), torch.tensor(all_labels))
-    print(f"Validation Loss: {val_loss/len(val_dataloaders)}, Validation Accuracy: {accuracy}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}, AUC: {auc}")
-    # print(f"Sample predictions: {all_preds[:5]}")
-    # print(f"Sample labels: {all_labels[:5]}")
-    # wandb.log({"Validation Loss": val_loss, "Validation Accuracy": accuracy, "Validation Precision": precision, 
-    #            "Validation Recall": recall, "Validation F1": f1, "Validation ROC AUC": auc})
+    print(f"Validation Loss: {val_loss/len(val_dataloaders):.4f}, Validation Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}, AUC: {auc:.4f}")
+    # wandb.log({"Validation Loss": round(val_loss/len(val_dataloaders), 4), "Validation Accuracy": round(accuracy, 4), "Validation Precision": round(precision, 4), 
+    #            "Validation Recall": round(recall, 4), "Validation F1": round(f1, 4), "Validation ROC AUC": round(auc, 4)})
 
 # torch.save(model.state_dict(), 'clip_classifier.pth')
     
@@ -370,6 +386,6 @@ for test_dataloader in test_dataloaders:
 
 # optimal_threshold = find_optimal_threshold(np.array(all_labels), np.array(all_preds))
 accuracy, precision, recall, f1, auc = model.module.calculate_metrics(torch.tensor(all_preds), torch.tensor(all_labels))
-print(f"Test Accuracy: {accuracy}, Precision: {precision}, Recall: {recall}, F1 Score: {f1}, AUC: {auc}")
-# wandb.log({"Test Accuracy": accuracy, "Test Precision": precision, "Test Recall": recall, 
-#            "Test F1": f1, "Test ROC AUC": auc})
+print(f"Test Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}, AUC: {auc:.4f}")
+# wandb.log({"Test Accuracy": round(accuracy, 4), "Test Precision": round(precision, 4), "Test Recall": round(recall, 4), "Test F1": round(f1, 4), "Test ROC AUC": round(auc, 4)})
+# wandb.finish()
